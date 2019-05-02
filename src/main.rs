@@ -8,6 +8,9 @@
 extern crate regex;
 #[macro_use] extern crate lazy_static;
 
+#[cfg(test)]
+use pretty_assertions::assert_eq;
+
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
@@ -35,7 +38,7 @@ enum RepeatType {
     MsgstrPlural(u32),
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 enum ParseResult {
     Ok,
     NextEntry,
@@ -186,6 +189,9 @@ impl<'l> PoEntry<'l> {
             static ref PLURAL_REGEX : Regex = Regex::new(r"^msgstr\[(\d+)\] (.*)$").expect("Valid PLURAL_REGEX");
         }
 
+        self.input.push_str(line);
+        self.input.push('\n');
+
         let captures : regex::Captures<'_> = PLURAL_REGEX.captures(&line).expect("Valid msgstr_plural line");
         let n : u32 = captures.get(1).map_or("", |m| m.as_str()).parse().expect("Valid PLURAL_REGEX Group 1");
         let value : &str = captures.get(2).expect("Valid PLURAL_REGEX Group 2").as_str();
@@ -222,7 +228,7 @@ impl<'l> PoEntry<'l> {
     }
     pub fn parse_line(&mut self, line: &'l str) -> ParseResult {
         lazy_static! {
-            static ref WHITESPACE: Regex = Regex::new(r"^\W*$").expect("Valid WHITESPACE Regex");
+            static ref WHITESPACE: Regex = Regex::new(r"^\s*$").expect("Valid WHITESPACE Regex");
         }
 
         if WHITESPACE.is_match(&line) {
@@ -235,7 +241,7 @@ impl<'l> PoEntry<'l> {
         }
 
         if line.len() < 3 {
-            println!("Error: Invalid line {:?}", line);
+            // println!("Error: Invalid line {:?}", line);
 
             self.invalid(line);
             return ParseResult::Ok;
@@ -319,17 +325,16 @@ impl<'l> PoEntry<'l> {
 pub fn parse_po_lines(lines: &str) -> Result<String, MyErr> {
     let mut current_entry = PoEntry::new();
     let mut result = String::new();
-    let mut first = true;  // TODO handle the first newline in the header handling and remove `first` here.
+    // let mut first = true;  // TODO handle the first newline in the header handling and remove `first` here.
 
     for line in lines.lines() {
+        print!("Parsing {:?}.. ", line);
         match current_entry.parse_line(line) {
-            ParseResult::Ok => {},
+            ParseResult::Ok => {println!("Got ok")},
             ParseResult::NextEntry => {
-                if first {
-                    first = false;
-                    continue;
-                }
+                println!("Got NextEntry");
                 current_entry.commit(&mut result);
+                result.push_str(line);
                 result.push('\n');
                 current_entry = PoEntry::new();
             }
@@ -365,17 +370,17 @@ fn simple_parser_test() {
 
     let mut po_entry = PoEntry::new();
     for line in src {
-        assert!(po_entry.parse_line(line) == ParseResult::Ok);
+        assert_eq!(po_entry.parse_line(line), ParseResult::Ok)
     }
     assert!(po_entry.valid);
-    assert!(po_entry.parse_line("") == ParseResult::NextEntry);
+    assert_eq!(po_entry.parse_line(""), ParseResult::NextEntry);
 
     let mut output = String::new();
     po_entry.commit(&mut output);
 
     let res: Vec<&str> = output.lines().collect();
-    assert!(res[0] == "msgid \"foo\"");
-    assert!(res[1] == "msgstr \"bar\"");
+    assert_eq!(res[0], "msgid \"foo\"");
+    assert_eq!(res[1], "msgstr \"bar\"");
 }
 
 #[test]
@@ -396,26 +401,26 @@ fn full_parser_test() {
     let mut po_entry = PoEntry::new();
 
     for line in src {
-        assert!(po_entry.parse_line(line) == ParseResult::Ok);
+        assert_eq!(po_entry.parse_line(line), ParseResult::Ok)
     }
     assert!(po_entry.valid);
-    assert!(po_entry.parse_line("") == ParseResult::NextEntry);
+    assert_eq!(po_entry.parse_line(""), ParseResult::NextEntry);
 
     let mut output = String::new();
     po_entry.commit(&mut output);
 
     println!("Output: {}", output);
     let res: Vec<&str> = output.lines().collect();
-    assert!(res[0] == "#  translator-comment");
-    assert!(res[1] == "#  some_other_comment");
-    assert!(res[2] == "#. code comment");
-    assert!(res[3] == "#: file.rs:1337");
-    assert!(res[4] == "#, fuzzy, c-format");
-    assert!(res[5] == "#| \"blork\"");
-    assert!(res[6] == "msgid \"No thing found\"");
-    assert!(res[7] == "msgid_plural \"%d things found\"");
-    assert!(res[8] == "msgstr[0] \"Nothing found\"");
-    assert!(res[9] == "msgstr[1] \"%dthing found\"");
+    assert_eq!(res[0], "#  translator-comment");
+    assert_eq!(res[1], "#  some_other_comment");
+    assert_eq!(res[2], "#. code comment");
+    assert_eq!(res[3], "#: file.rs:1337");
+    assert_eq!(res[4], "#, fuzzy, c-format");
+    assert_eq!(res[5], "#| \"blork\"");
+    assert_eq!(res[6], "msgid \"No thing found\"");
+    assert_eq!(res[7], "msgid_plural \"%d things found\"");
+    assert_eq!(res[8], "msgstr[0] \"Nothing found\"");
+    assert_eq!(res[9], "msgstr[1] \"%dthing found\"");
 }
 
 #[test]
@@ -428,7 +433,7 @@ fn invalid_test() {
 
     let mut po_entry = PoEntry::new();
     for line in src {
-        assert!(po_entry.parse_line(line) == ParseResult::Ok);
+        assert_eq!(po_entry.parse_line(line), ParseResult::Ok)
     }
     assert!(!po_entry.valid);
 
@@ -436,97 +441,28 @@ fn invalid_test() {
     po_entry.commit(&mut output);
 
     let res: Vec<&str> = output.lines().collect();
-    assert!(res[0] == "msgid \"foo\"");
-    assert!(res[1] == "somethingelse \"bar\"");
-    assert!(res[2] == "msgstr \"bar\"");
+    assert_eq!(res[0], "msgid \"foo\"");
+    assert_eq!(res[1], "somethingelse \"bar\"");
+    assert_eq!(res[2], "msgstr \"bar\"");
 }
 
-#[test]
-fn complete_file_test() {
-    let s = r#"# SOME DESCRIPTIVE TITLE.
-# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
-# This file is distributed under the same license as the PACKAGE package.
-# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
-#
-#, fuzzy
-msgid ""
-msgstr ""
-"Project-Id-Version: PACKAGE VERSION\n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2019-04-30 17:57+0000\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language-Team: LANGUAGE <LL@li.org>\n"
-"Language: \n"
-"MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=UTF-8\n"
-"Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+ #[test]
+ fn completet_file_with_valid_content() {
+     let mut s = String::new();
+     File::open("corpus/clean.po").unwrap().read_to_string(&mut s).unwrap();
+     assert_eq!(parse_po_lines(&s).unwrap(), s);
+ }
 
-#: dj/views.py:3
-msgid "text1"
-msgstr "ylo"
+ #[test]
+ fn completet_file_with_invalid_content() {
+     let mut s = String::new();
+     File::open("corpus/paths.po").unwrap().read_to_string(&mut s).unwrap();
+     assert_eq!(parse_po_lines(&s).unwrap(), s);
+ }
 
-#: dj/views.py:4
-msgid "text2"
-msgstr "what"
-
-#: dj/views.py:5
-msgid "text3"
-msgstr "ever"
-
-#: dj/views.py:7
-msgid "text_gettext"
-msgstr "floats"
-
-#: dj/views.py:8
-msgid "text_sing"
-msgid_plural "text_pl"
-msgstr[0] "your"
-msgstr[1] "gettext"
-    "#;
-
-    let output = parse_po_lines(s).unwrap();
-    let res : Vec<&str> = output.lines().collect();
-
-    assert!(res[0] == "# SOME DESCRIPTIVE TITLE.");
-    assert!(res[1] == "# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER");
-    assert!(res[2] == "# This file is distributed under the same license as the PACKAGE package.");
-    assert!(res[3] == "# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.");
-    assert!(res[4] == "#, fuzzy");
-    assert!(res[5] == "msgid \"\"");
-    assert!(res[6] == "msgstr \"\"");
-    assert!(res[7] == "\"Project-Id-Version: PACKAGE VERSION\\n\"");
-    assert!(res[8] == "\"Report-Msgid-Bugs-To: \\n\"");
-    assert!(res[9] == "\"POT-Creation-Date: 2019-04-30 17:57+0000\\n\"");
-    assert!(res[10] == "\"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\\n\"");
-    assert!(res[11] == "\"Last-Translator: FULL NAME <EMAIL@ADDRESS>\\n\"");
-    assert!(res[12] == "\"Language-Team: LANGUAGE <LL@li.org>\\n\"");
-    assert!(res[13] == "\"Language: \\n\"");
-    assert!(res[14] == "\"MIME-Version: 1.0\\n\"");
-    assert!(res[15] == "\"Content-Type: text/plain; charset=UTF-8\\n\"");
-    assert!(res[16] == "\"Content-Transfer-Encoding: 8bit\\n\"");
-    assert!(res[17] == "\"Plural-Forms: nplurals=2; plural=(n != 1);\\n\"");
-    assert!(res[18] == "");
-    assert!(res[19] == "#: dj/views.py:3");
-    assert!(res[20] == "msgid \"text1\"");
-    assert!(res[21] == "msgstr \"ylo\"");
-    assert!(res[22] == "");
-    assert!(res[23] == "#: dj/views.py:4");
-    assert!(res[24] == "msgid \"text2\"");
-    assert!(res[25] == "msgstr \"what\"");
-    assert!(res[26] == "");
-    assert!(res[27] == "#: dj/views.py:5");
-    assert!(res[28] == "msgid \"text3\"");
-    assert!(res[29] == "msgstr \"ever\"");
-    assert!(res[30] == "");
-    assert!(res[31] == "#: dj/views.py:7");
-    assert!(res[32] == "msgid \"text_gettext\"");
-    assert!(res[33] == "msgstr \"floats\"");
-    assert!(res[34] == "");
-    assert!(res[35] == "#: dj/views.py:8");
-    assert!(res[36] == "msgid \"text_sing\"");
-    assert!(res[37] == "msgid_plural \"text_pl\"");
-    assert!(res[38] == "msgstr[0] \"your\"");
-    assert!(res[39] == "msgstr[1] \"gettext\"");
-}
+ #[test]
+ fn completet_file_with_invalid_content2() {
+     let mut s = String::new();
+     File::open("corpus/nochange.po").unwrap().read_to_string(&mut s).unwrap();
+     assert_eq!(parse_po_lines(&s).unwrap(), s);
+ }
