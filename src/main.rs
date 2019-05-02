@@ -4,14 +4,13 @@
 // TODO merge multiple
 // TODO support plural
 // TODO merge strings so that changes in the string splitting can be resolved automatically
-// TODO reduce copies
 
 extern crate regex;
 #[macro_use] extern crate lazy_static;
 
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::Read;
 use regex::Regex;
 
 
@@ -43,23 +42,23 @@ enum ParseResult {
 }
 
 #[derive(Clone)]
-struct PoEntry {
+struct PoEntry<'l> {
     valid: bool,
     repeat_type: RepeatType,
-    input: Vec<String>,
-    translator_comments: Vec<String>,
-    extracted_comments: Vec<String>,
-    references: Vec<String>,
-    flags: Vec<String>,
-    previous_untranslated_strings: Vec<String>,
-    msgctxts: Vec<String>,
-    msgids: Vec<String>,
-    msgid_plurals: Vec<String>,
-    msgstrs: Vec<String>,
-    msgstr_plurals: HashMap<u32, Vec<String>>,
+    input: String,
+    translator_comments: Vec<&'l str>,
+    extracted_comments: Vec<&'l str>,
+    references: Vec<&'l str>,
+    flags: Vec<&'l str>,
+    previous_untranslated_strings: Vec<&'l str>,
+    msgctxts: Vec<&'l str>,
+    msgids: Vec<&'l str>,
+    msgid_plurals: Vec<&'l str>,
+    msgstrs: Vec<&'l str>,
+    msgstr_plurals: HashMap<u32, Vec<&'l str>>,
 }
 
-fn _print_with_title(title: &str, lines: &Vec<String>, result_lines: &mut Vec<String>) {
+fn _print_with_title<'l>(title: &str, lines: &Vec<&'l str>, result: &mut String) {
     if lines.len() == 0 {
         return
     }
@@ -67,20 +66,21 @@ fn _print_with_title(title: &str, lines: &Vec<String>, result_lines: &mut Vec<St
     let mut first = true;
     for line in lines {
         if first {
-            result_lines.push(String::from(format!("{} {}", title, line)));
+            result.push_str(&format!("{} {}\n", title, *line));
             first = false;
         } else {
-            result_lines.push(line.clone());
+            result.push_str(*line);
+            result.push('\n');
         }
     }
 }
 
-impl PoEntry {
+impl<'l> PoEntry<'l> {
     fn new() -> Self {
         PoEntry{
             valid: true,
             repeat_type: RepeatType::Invalid,
-            input: vec!(),
+            input: String::new(),
             translator_comments: vec!(),
             extracted_comments: vec!(),
             references: vec!(),
@@ -93,76 +93,85 @@ impl PoEntry {
             msgstr_plurals: HashMap::new(),
         }
     }
-    fn translator_comment(&mut self, line: String) {
-        self.input.push(line.clone());
-        self.translator_comments.push(String::from(&line[3..]));
+    fn translator_comment(&mut self, line: &'l str) {
+        self.input.push_str(line);
+        self.input.push('\n');
+        self.translator_comments.push(&line[3..]);
         self.repeat_type = RepeatType::Invalid;
     }
-    fn extracted_comment(&mut self, line: String) {
-        self.input.push(line.clone());
-        self.extracted_comments.push(String::from(&line[3..]));
+    fn extracted_comment(&mut self, line: &'l str) {
+        self.input.push_str(line);
+        self.input.push('\n');
+        self.extracted_comments.push(&line[3..]);
         self.repeat_type = RepeatType::Invalid;
     }
-    fn reference(&mut self, line: String) {
-        self.input.push(line.clone());
-        self.references.push(String::from(&line[3..]));
+    fn reference(&mut self, line: &'l str) {
+        self.input.push_str(line);
+        self.input.push('\n');
+        self.references.push(&line[3..]);
         self.repeat_type = RepeatType::Invalid;
     }
-    fn flag(&mut self, line: String) {
-        self.input.push(line.clone());
-        self.flags.push(String::from(&line[3..]));
+    fn flag(&mut self, line: &'l str) {
+        self.input.push_str(line);
+        self.input.push('\n');
+        self.flags.push(&line[3..]);
         self.repeat_type = RepeatType::Invalid;
     }
-    fn previous_untranslated_string(&mut self, line: String) {
-        self.input.push(line.clone());
-        self.previous_untranslated_strings.push(String::from(&line[3..]));
+    fn previous_untranslated_string(&mut self, line: &'l str) {
+        self.input.push_str(line);
+        self.input.push('\n');
+        self.previous_untranslated_strings.push(&line[3..]);
         self.repeat_type = RepeatType::Invalid;
     }
-    fn msgctxt(&mut self, line: String) {
-        self.input.push(line.clone());
+    fn msgctxt(&mut self, line: &'l str) {
+        self.input.push_str(line);
+        self.input.push('\n');
         if self.msgctxts.len() != 0 {
             println!("Warning: Repeated msgctxt in line {}", line);
             self.valid = false;
             return;
         }
 
-        self.msgctxts.push(String::from(&line[8..]));
+        self.msgctxts.push(&line[8..]);
         self.repeat_type = RepeatType::Msgctxt;
     }
-    fn msgid(&mut self, line: String) {
-        self.input.push(line.clone());
+    fn msgid(&mut self, line: &'l str) {
+        self.input.push_str(line);
+        self.input.push('\n');
         if self.msgids.len() != 0 {
             println!("Warning: Repeated msgid in line {}", line);
             self.valid = false;
             return;
         }
 
-        self.msgids.push(String::from(&line[6..]));
+        self.msgids.push(&line[6..]);
         self.repeat_type = RepeatType::Msgid;
     }
-    fn msgid_plural(&mut self, line: String) {
-        self.input.push(line.clone());
+    fn msgid_plural(&mut self, line: &'l str) {
+        self.input.push_str(line);
+        self.input.push('\n');
         if self.msgid_plurals.len() != 0 {
             println!("Warning: Repeated msgid_plural in line {}", line);
             self.valid = false;
             return;
         }
 
-        self.msgid_plurals.push(String::from(&line[13..]));
+        self.msgid_plurals.push(&line[13..]);
         self.repeat_type = RepeatType::MsgidPlural;
     }
-    fn msgstr(&mut self, line: String) {
-        self.input.push(line.clone());
+    fn msgstr(&mut self, line: &'l str) {
+        self.input.push_str(line);
+        self.input.push('\n');
         if self.msgstrs.len() != 0 {
             println!("Warning: Repeated msgstr in line {}", line);
             self.valid = false;
             return;
         }
 
-        self.msgstrs.push(String::from(&line[7..]));
+        self.msgstrs.push(&line[7..]);
         self.repeat_type = RepeatType::Msgstr;
     }
-    fn _add_plural(&mut self, n: u32, value: &str) {
+    fn _add_plural(&mut self, n: u32, value: &'l str) {
         let plurals = match self.msgstr_plurals.get_mut(&n) {
             Some(v) => v,
             None => {
@@ -170,9 +179,9 @@ impl PoEntry {
                 self.msgstr_plurals.get_mut(&n).unwrap()
             }
         };
-        plurals.push(String::from(value));
+        plurals.push(value);
     }
-    fn msgstr_plural(&mut self, line: String) {
+    fn msgstr_plural(&mut self, line: &'l str) {
         lazy_static! {
             static ref PLURAL_REGEX : Regex = Regex::new(r"^msgstr\[(\d+)\] (.*)$").expect("Valid PLURAL_REGEX");
         }
@@ -189,13 +198,16 @@ impl PoEntry {
         self._add_plural(n, value);
         self.repeat_type = RepeatType::MsgstrPlural(n);
     }
-    fn invalid(&mut self, line: String) {
-        self.input.push(line.clone());
+    fn invalid(&mut self, line: &'l str) {
+        self.input.push_str(line);
+        self.input.push('\n');
         self.valid = false;
         self.repeat_type = RepeatType::Invalid;
     }
-    fn repeat(&mut self, line: String) {
-        self.input.push(line.clone());
+    fn repeat(&mut self, line: &'l str) {
+        self.input.push_str(line);
+        self.input.push('\n');
+
         match &self.repeat_type {
             RepeatType::Msgid => self.msgids.push(line),
             RepeatType::Msgstr => self.msgstrs.push(line),
@@ -208,7 +220,7 @@ impl PoEntry {
             },
         }
     }
-    pub fn parse_line(&mut self, line: String) -> ParseResult {
+    pub fn parse_line(&mut self, line: &'l str) -> ParseResult {
         lazy_static! {
             static ref WHITESPACE: Regex = Regex::new(r"^\W*$").expect("Valid WHITESPACE Regex");
         }
@@ -264,38 +276,36 @@ impl PoEntry {
 
         ParseResult::Ok
     }
-    pub fn commit(self, result_lines: &mut Vec<String>) {
+    pub fn commit(self, result: &mut String) {
         if !self.is_valid() {
-            for line in self.input {
-                result_lines.push(line);
-            }
+            result.push_str(&self.input);
             return;
         }
         for translator_comment in self.translator_comments {
-            result_lines.push(String::from(format!("#  {}", translator_comment)));
+            result.push_str(&format!("#  {}\n", translator_comment));
         }
         for extracted_comment in self.extracted_comments {
-            result_lines.push(String::from(format!("#. {}", extracted_comment)));
+            result.push_str(&format!("#. {}\n", extracted_comment));
         }
         for reference in self.references {
-            result_lines.push(String::from(format!("#: {}", reference)));
+            result.push_str(&format!("#: {}\n", reference));
         }
         for flag in self.flags {
-            result_lines.push(String::from(format!("#, {}", flag)));
+            result.push_str(&format!("#, {}\n", flag));
         }
         for previous_untranslated_string in self.previous_untranslated_strings {
-            result_lines.push(String::from(format!("#| {}", previous_untranslated_string)));
+            result.push_str(&format!("#| {}\n", previous_untranslated_string));
         }
-        _print_with_title("msgctxt", &self.msgctxts, result_lines);
-        _print_with_title("msgid", &self.msgids, result_lines);
-        _print_with_title("msgid_plural", &self.msgid_plurals, result_lines);
-        _print_with_title("msgstr", &self.msgstrs, result_lines);
+        _print_with_title("msgctxt", &self.msgctxts, result);
+        _print_with_title("msgid", &self.msgids, result);
+        _print_with_title("msgid_plural", &self.msgid_plurals, result);
+        _print_with_title("msgstr", &self.msgstrs, result);
 
         let mut keys: Vec<&u32> = (&self.msgstr_plurals).keys().collect();
         keys.sort();
         for n in keys {
             let lines = &self.msgstr_plurals[n];
-            _print_with_title(&format!("msgstr[{}]", n), &lines, result_lines);
+            _print_with_title(&format!("msgstr[{}]", n), &lines, result);
         }
     }
     pub fn has_content(&self) -> bool {
@@ -306,12 +316,12 @@ impl PoEntry {
     }
 }
 
-pub fn parse_po_lines(lines: Vec<String>) -> Result<Vec<String>, MyErr> {
+pub fn parse_po_lines(lines: &str) -> Result<String, MyErr> {
     let mut current_entry = PoEntry::new();
-    let mut result_lines: Vec<String> = vec!();
+    let mut result = String::new();
     let mut first = true;  // TODO handle the first newline in the header handling and remove `first` here.
 
-    for line in lines {
+    for line in lines.lines() {
         match current_entry.parse_line(line) {
             ParseResult::Ok => {},
             ParseResult::NextEntry => {
@@ -319,18 +329,18 @@ pub fn parse_po_lines(lines: Vec<String>) -> Result<Vec<String>, MyErr> {
                     first = false;
                     continue;
                 }
-                current_entry.commit(&mut result_lines);
-                result_lines.push(String::from(""));
+                current_entry.commit(&mut result);
+                result.push('\n');
                 current_entry = PoEntry::new();
             }
         }
     };
 
     if current_entry.has_content() {
-        current_entry.commit(&mut result_lines);
+        current_entry.commit(&mut result);
     }
 
-    Ok(result_lines)
+    Ok(result)
 }
 
 fn main() -> Result<(), MyErr> {
@@ -339,19 +349,18 @@ fn main() -> Result<(), MyErr> {
         panic!("Missing Argument Filename");
     }
 
-    let lines : Vec<String> = BufReader::new(File::open(&argv[1])?).lines().map(|l| l.unwrap()).collect();
-    for line in parse_po_lines(lines)? {
-        println!("{}", line);
-    };
+    let mut file_content = String::new();
+    File::open(&argv[1])?.read_to_string(&mut file_content)?;
+    print!("{}", parse_po_lines(&file_content)?);
 
     return Ok(())
 }
 
 #[test]
 fn simple_parser_test() {
-    let src: Vec<String> = vec![
-        String::from("msgid \"foo\""),
-        String::from("msgstr \"bar\""),
+    let src: Vec<&str> = vec![
+        "msgid \"foo\"",
+        "msgstr \"bar\"",
     ];
 
     let mut po_entry = PoEntry::new();
@@ -359,27 +368,29 @@ fn simple_parser_test() {
         assert!(po_entry.parse_line(line) == ParseResult::Ok);
     }
     assert!(po_entry.valid);
-    assert!(po_entry.parse_line(String::from("")) == ParseResult::NextEntry);
+    assert!(po_entry.parse_line("") == ParseResult::NextEntry);
 
-    let mut res: Vec<String> = vec!();
-    po_entry.commit(&mut res);
+    let mut output = String::new();
+    po_entry.commit(&mut output);
+
+    let res: Vec<&str> = output.lines().collect();
     assert!(res[0] == "msgid \"foo\"");
     assert!(res[1] == "msgstr \"bar\"");
 }
 
 #[test]
 fn full_parser_test() {
-    let src: Vec<String> = vec![
-        String::from("#  translator-comment"),
-        String::from("#  some_other_comment"),
-        String::from("#. code comment"),
-        String::from("#: file.rs:1337"),
-        String::from("#, fuzzy, c-format"),
-        String::from("#| \"blork\""),
-        String::from("msgid \"No thing found\""),
-        String::from("msgid_plural \"%d things found\""),
-        String::from("msgstr[0] \"Nothing found\""),
-        String::from("msgstr[1] \"%dthing found\""),
+    let src: Vec<&str> = vec![
+        "#  translator-comment",
+        "#  some_other_comment",
+        "#. code comment",
+        "#: file.rs:1337",
+        "#, fuzzy, c-format",
+        "#| \"blork\"",
+        "msgid \"No thing found\"",
+        "msgid_plural \"%d things found\"",
+        "msgstr[0] \"Nothing found\"",
+        "msgstr[1] \"%dthing found\"",
     ];
 
     let mut po_entry = PoEntry::new();
@@ -388,12 +399,13 @@ fn full_parser_test() {
         assert!(po_entry.parse_line(line) == ParseResult::Ok);
     }
     assert!(po_entry.valid);
-    assert!(po_entry.parse_line(String::from("")) == ParseResult::NextEntry);
+    assert!(po_entry.parse_line("") == ParseResult::NextEntry);
 
-    let mut res: Vec<String> = vec!();
+    let mut output = String::new();
+    po_entry.commit(&mut output);
 
-    po_entry.commit(&mut res);
-
+    println!("Output: {}", output);
+    let res: Vec<&str> = output.lines().collect();
     assert!(res[0] == "#  translator-comment");
     assert!(res[1] == "#  some_other_comment");
     assert!(res[2] == "#. code comment");
@@ -408,10 +420,10 @@ fn full_parser_test() {
 
 #[test]
 fn invalid_test() {
-    let src: Vec<String> = vec![
-        String::from("msgid \"foo\""),
-        String::from("somethingelse \"bar\""),
-        String::from("msgstr \"bar\""),
+    let src: Vec<&str> = vec![
+        "msgid \"foo\"",
+        "somethingelse \"bar\"",
+        "msgstr \"bar\"",
     ];
 
     let mut po_entry = PoEntry::new();
@@ -420,8 +432,10 @@ fn invalid_test() {
     }
     assert!(!po_entry.valid);
 
-    let mut res: Vec<String> = vec!();
-    po_entry.commit(&mut res);
+    let mut output = String::new();
+    po_entry.commit(&mut output);
+
+    let res: Vec<&str> = output.lines().collect();
     assert!(res[0] == "msgid \"foo\"");
     assert!(res[1] == "somethingelse \"bar\"");
     assert!(res[2] == "msgstr \"bar\"");
@@ -472,7 +486,8 @@ msgstr[0] "your"
 msgstr[1] "gettext"
     "#;
 
-    let res = parse_po_lines(s.lines().map(|l| String::from(l)).collect()).unwrap();
+    let output = parse_po_lines(s).unwrap();
+    let res : Vec<&str> = output.lines().collect();
 
     assert!(res[0] == "# SOME DESCRIPTIVE TITLE.");
     assert!(res[1] == "# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER");
