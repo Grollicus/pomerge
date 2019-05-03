@@ -1,9 +1,9 @@
-// TODO merge paths
 // TODO merge nochange
 // TODO merge Header
 // TODO merge multiple
-// TODO support plural
 // TODO merge strings so that changes in the string splitting can be resolved automatically
+// #~ lines
+// TODO make input a slice
 
 extern crate regex;
 #[macro_use] extern crate lazy_static;
@@ -28,7 +28,7 @@ impl std::convert::From<std::io::Error> for MyErr {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 enum RepeatType {
     Invalid,
     Msgctxt,
@@ -44,7 +44,11 @@ enum ParseResult {
     NextEntry,
 }
 
-#[derive(Clone)]
+trait Parser<'l> {
+    fn parse_line(&mut self, line: &'l str) -> ParseResult;
+}
+
+#[derive(Clone, Debug)]
 struct PoEntry<'l> {
     valid: bool,
     repeat_type: RepeatType,
@@ -214,12 +218,12 @@ impl<'l> PoEntry<'l> {
         self.input.push_str(line);
         self.input.push('\n');
 
-        match &self.repeat_type {
+        match self.repeat_type {
             RepeatType::Msgid => self.msgids.push(line),
             RepeatType::Msgstr => self.msgstrs.push(line),
             RepeatType::Msgctxt => self.msgctxts.push(line),
             RepeatType::MsgidPlural => self.msgid_plurals.push(line),
-            RepeatType::MsgstrPlural(n) => self._add_plural(*n, &line),
+            RepeatType::MsgstrPlural(n) => self._add_plural(n, &line),
             RepeatType::Invalid => {
                 println!("Warning: Unexpected repeated line {}", line);
                 self.valid = false
@@ -241,8 +245,6 @@ impl<'l> PoEntry<'l> {
         }
 
         if line.len() < 3 {
-            // println!("Error: Invalid line {:?}", line);
-
             self.invalid(line);
             return ParseResult::Ok;
         }
@@ -317,22 +319,189 @@ impl<'l> PoEntry<'l> {
     pub fn has_content(&self) -> bool {
         return self.translator_comments.len() > 0 || self.extracted_comments.len() > 0 || self.references.len() > 0 || self.flags.len() > 0 || self.previous_untranslated_strings.len() > 0 || self.msgids.len() > 0 || self.msgstrs.len() > 0
     }
+    pub fn try_merge(&self, other: &PoEntry<'l>) -> Option<PoEntry<'l>> {
+        if !self.valid || !other.valid {
+            if self.is_valid() && other.is_valid() && self.input == other.input {
+                return Some(self.clone())
+            }
+            return None
+        }
+
+        if self.translator_comments.len() != other.translator_comments.len() || self.translator_comments.iter().zip(&other.translator_comments).any(|(a, b)| a != b) {
+            return None
+        }
+        if self.extracted_comments.len() != other.extracted_comments.len() || self.extracted_comments.iter().zip(&other.extracted_comments).any(|(a, b)| a != b) {
+            return None
+        }
+        if self.flags.len() != other.flags.len() || self.flags.iter().zip(&other.flags).any(|(a, b)| a != b) {
+            return None
+        }
+        if self.previous_untranslated_strings.len() != other.previous_untranslated_strings.len() || self.previous_untranslated_strings.iter().zip(&other.previous_untranslated_strings).any(|(a, b)| a != b) {
+            return None
+        }
+        if self.msgids.len() != other.msgids.len() || self.msgids.iter().zip(&other.msgids).any(|(a, b)| a != b) {
+            return None
+        }
+        if self.msgstrs.len() != other.msgstrs.len() || self.msgstrs.iter().zip(&other.msgstrs).any(|(a, b)| a != b) {
+            return None
+        }
+        if self.msgctxts.len() != other.msgctxts.len() || self.msgctxts.iter().zip(&other.msgctxts).any(|(a, b)| a != b) {
+            return None
+        }
+        if self.msgid_plurals.len() != other.msgid_plurals.len() || self.msgid_plurals.iter().zip(&other.msgid_plurals).any(|(a, b)| a != b) {
+            return None
+        }
+        if self.msgstr_plurals.len() != other.msgstr_plurals.len() || self.msgstr_plurals.keys().map(|n| (&self.msgstr_plurals[n], other.msgstr_plurals.get(n))).any(|(la, lb)| lb.is_none() || la.len() != lb.unwrap().len() || la.iter().zip(lb.unwrap()).any(|(a, b)| a != b)) {
+            return None
+        }
+
+        return Some(self.clone())
+    }
     fn is_valid(&self) -> bool {
-        return self.valid && (self.msgids.len() > 0 || self.msgid_plurals.len() > 0) && (self.msgstrs.len() > 0 || self.msgstr_plurals.len() > 0)
+        return self.valid && (self.msgids.len() > 0) && (self.msgstrs.len() > 0 || self.msgstr_plurals.len() > 0)
     }
 }
 
+#[test]
+fn test_poentry_try_merge() {
+    let test_cases : Vec<(_, _, _, _, Option<&str>)> = vec![
+        (vec!["invalid"], vec!["msgid \"asdf\""], false, true, None),
+        (vec!["msgid \"asdf\""], vec!["invalid"], true, false, None),
+        (vec!["msgid \"asdf\""], vec!["msgid \"something else\""], true, true, None),
+        (vec!["msgid \"asdf\""], vec!["msgid \"asdf\""], true, true, Some("msgid \"asdf\"\n")),
+        (vec!["msgid \"asdf\"", "msgstr \"asdf\""], vec!["msgid \"asdf\"", "msgstr \"asdf\""], true, true, Some("msgid \"asdf\"\nmsgstr \"asdf\"\n")),
+    ];
+
+    for (inpa, inpb, valida, validb, expected_result) in test_cases {
+        let mut a = PoEntry::new();
+        let mut b = PoEntry::new();
+        for line in inpa {
+            a.parse_line(line);
+        }
+        for line in inpb {
+            b.parse_line(line);
+        }
+
+        assert_eq!(a.valid, valida);
+        assert_eq!(b.valid, validb);
+        if let Some(expected_str) = expected_result {
+            let mut output = String::new();
+            a.try_merge(&b).unwrap().commit(&mut output);
+            assert_eq!(expected_str, output);
+        } else {
+            assert!(a.try_merge(&b).is_none());
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+enum ConflictPosition {
+    Left,
+    Right
+}
+
+#[derive(Debug)]
+struct Conflict<'l> {
+    input: String,
+    position: ConflictPosition,
+    left: Vec<PoEntry<'l>>,
+    right: Vec<PoEntry<'l>>,
+}
+
+impl<'l> Conflict<'l> {
+    fn new(initial_entry: PoEntry<'l>, initial_line: &str) -> Self {
+        Conflict {
+            input: format!("{}\n", initial_line),
+            position: ConflictPosition::Left,
+            left: vec![initial_entry.clone()],
+            right: vec![initial_entry],
+        }
+    }
+
+    fn parse_left(&mut self, line: &'l str) -> ParseResult {
+        if line.len() >= 7 && &line[0..7] == "=======" {
+            return ParseResult::NextEntry;
+        }
+        if self.left.last_mut().unwrap().parse_line(line) == ParseResult::NextEntry {
+            self.left.push(PoEntry::new());
+        }
+        return ParseResult::Ok;
+    }
+
+    fn parse_right(&mut self, line: &'l str) -> ParseResult {
+        if line.len() >= 8 && &line[0..8] == ">>>>>>> " {
+            return ParseResult::NextEntry;
+        }
+        if self.right.last_mut().unwrap().parse_line(line) == ParseResult::NextEntry {
+            self.right.push(PoEntry::new());
+        }
+        return ParseResult::Ok;
+    }
+
+    fn parse_line(&mut self, line: &'l str) -> ParseResult {
+        self.input.push_str(line);
+        self.input.push('\n');
+
+        if self.position == ConflictPosition::Left && self.parse_left(line) == ParseResult::NextEntry {
+            self.position = ConflictPosition::Right;
+            return ParseResult::Ok;
+        }
+        return self.parse_right(line);
+    }
+
+    fn try_merge(&self) -> Option<Vec<PoEntry<'l>>> {
+        let mut res = vec!();
+        for (left, right) in self.left.iter().zip(self.right.iter()) {
+            if let Some(merged) = left.try_merge(right) {
+                res.push(merged);
+            } else {
+                return None
+            }
+        }
+        return Some(res);
+    }
+
+    fn commit(self, result: &mut  String) -> PoEntry<'l> {
+        if let Some(mut entries) = self.try_merge() {
+            let last_entry = entries.pop().unwrap_or_else(|| PoEntry::new());
+            for entry in entries {
+                entry.commit(result);
+            }
+            return last_entry;
+        }
+        result.push_str(&self.input);
+        // *current_entry = PoEntry::new(); // TODO
+        return PoEntry::new();
+    }
+}
+
+#[test]
+fn test_conflict_marker_parsing() {
+    let initial = PoEntry::new();
+    let mut c = Conflict::new(initial, "<<<<<<<");
+    assert!(c.parse_left("=======") == ParseResult::NextEntry);
+    assert_eq!(c.parse_right(">>>>>>> "), ParseResult::NextEntry)
+}
+
 pub fn parse_po_lines(lines: &str) -> Result<String, MyErr> {
-    let mut current_entry = PoEntry::new();
     let mut result = String::new();
-    // let mut first = true;  // TODO handle the first newline in the header handling and remove `first` here.
+    let mut current_entry = PoEntry::new();
+    let mut current_conflict : Option<Conflict> = None;
 
     for line in lines.lines() {
-        print!("Parsing {:?}.. ", line);
-        match current_entry.parse_line(line) {
-            ParseResult::Ok => {println!("Got ok")},
-            ParseResult::NextEntry => {
-                println!("Got NextEntry");
+        if let Some(mut conflict) = current_conflict {
+            if conflict.parse_line(line) == ParseResult::Ok {
+                current_conflict = Some(conflict);
+            } else {
+                current_entry = conflict.commit(&mut result);
+                current_conflict = None;
+            }
+        } else {
+            if line.len() > 7 && &line[0..7] == "<<<<<<<" {
+                current_conflict = Some(Conflict::new(current_entry.clone(), line));
+                continue;
+            }
+            if current_entry.parse_line(line) == ParseResult::NextEntry {
                 current_entry.commit(&mut result);
                 result.push_str(line);
                 result.push('\n');
@@ -448,21 +617,27 @@ fn invalid_test() {
 
  #[test]
  fn completet_file_with_valid_content() {
-     let mut s = String::new();
-     File::open("corpus/clean.po").unwrap().read_to_string(&mut s).unwrap();
-     assert_eq!(parse_po_lines(&s).unwrap(), s);
+     let mut input = String::new();
+     File::open("corpus/clean.po").unwrap().read_to_string(&mut input).unwrap();
+     let mut expected = String::new();
+     File::open("corpus/clean.po.res").unwrap().read_to_string(&mut expected).unwrap();
+     assert_eq!(parse_po_lines(&input).unwrap(), expected);
  }
 
  #[test]
  fn completet_file_with_invalid_content() {
-     let mut s = String::new();
-     File::open("corpus/paths.po").unwrap().read_to_string(&mut s).unwrap();
-     assert_eq!(parse_po_lines(&s).unwrap(), s);
+     let mut input = String::new();
+     File::open("corpus/paths.po").unwrap().read_to_string(&mut input).unwrap();
+     let mut expected = String::new();
+     File::open("corpus/paths.po.res").unwrap().read_to_string(&mut expected).unwrap();
+     assert_eq!(parse_po_lines(&input).unwrap(), expected);
  }
 
  #[test]
  fn completet_file_with_invalid_content2() {
-     let mut s = String::new();
-     File::open("corpus/nochange.po").unwrap().read_to_string(&mut s).unwrap();
-     assert_eq!(parse_po_lines(&s).unwrap(), s);
+     let mut input = String::new();
+     File::open("corpus/reorder.po").unwrap().read_to_string(&mut input).unwrap();
+     let mut expected = String::new();
+     File::open("corpus/reorder.po.res").unwrap().read_to_string(&mut expected).unwrap();
+     assert_eq!(parse_po_lines(&input).unwrap(), expected);
  }
