@@ -1,5 +1,4 @@
 // TODO merge nochange
-// TODO merge Header
 // TODO merge multiple
 // #~ lines
 // TODO make input a slice
@@ -49,40 +48,6 @@ trait Parser<'l> {
     fn parse_line(&mut self, line: &'l str) -> ParseResult;
 }
 
-#[derive(Clone, Debug)]
-struct PoEntry<'l> {
-    valid: bool,
-    repeat_type: RepeatType,
-    input: String,
-    translator_comments: Vec<&'l str>,
-    extracted_comments: Vec<&'l str>,
-    references: Vec<&'l str>,
-    flags: Vec<&'l str>,
-    previous_untranslated_strings: Vec<&'l str>,
-    msgctxts: String,
-    msgids: String,
-    msgid_plurals: String,
-    msgstrs: String,
-    msgstr_plurals: HashMap<u32, String>,
-}
-
-fn _print_with_title<'l>(title: &str, lines: &Vec<&'l str>, result: &mut String) {
-    if lines.len() == 0 {
-        return
-    }
-
-    let mut first = true;
-    for line in lines {
-        if first {
-            result.push_str(&format!("{} {}\n", title, *line));
-            first = false;
-        } else {
-            result.push_str(*line);
-            result.push('\n');
-        }
-    }
-}
-
 fn _append_quoted_string(full_string: &str, current_value: &mut String) {
     assert!(full_string.len() >= 2, "Invalid quoted string: too short");
     assert!(&full_string[0..1] == "\"", "Invalid quoted string: no quote at the beginning");
@@ -113,6 +78,24 @@ fn _format_as_quoted_string(title: &str, data: &str, result: &mut String) {
     writeln!(result, "\"{}\"", parts.last().unwrap()).expect("write! works on Strings");
 }
 
+#[derive(Clone, Debug)]
+struct PoEntry<'l> {
+    valid: bool,
+    repeat_type: RepeatType,
+    input: String,
+    translator_comments: Vec<&'l str>,
+    extracted_comments: Vec<&'l str>,
+    references: Vec<&'l str>,
+    flags: Vec<&'l str>,
+    previous_untranslated_strings: Vec<&'l str>,
+    msgctxts: String,
+    has_msgid: bool,
+    msgids: String,
+    msgid_plurals: String,
+    msgstrs: String,
+    msgstr_plurals: HashMap<u32, String>,
+}
+
 #[test]
 fn test_format_as_quoted_string() {
     let mut result = String::new();
@@ -136,6 +119,7 @@ impl<'l> PoEntry<'l> {
             flags: vec!(),
             previous_untranslated_strings: vec!(),
             msgctxts: String::new(),
+            has_msgid: false,
             msgids: String::new(),
             msgid_plurals: String::new(),
             msgstrs: String::new(),
@@ -187,12 +171,13 @@ impl<'l> PoEntry<'l> {
     fn msgid(&mut self, line: &'l str) {
         self.input.push_str(line);
         self.input.push('\n');
-        if self.msgids.len() != 0 {
+        if self.has_msgid {
             println!("Warning: Repeated msgid in line {}", line);
             self.valid = false;
             return;
         }
 
+        self.has_msgid = true;
         _append_quoted_string(&line[6..], &mut self.msgids);
         self.repeat_type = RepeatType::Msgid;
     }
@@ -365,6 +350,10 @@ impl<'l> PoEntry<'l> {
         return self.translator_comments.len() > 0 || self.extracted_comments.len() > 0 || self.references.len() > 0 || self.flags.len() > 0 || self.previous_untranslated_strings.len() > 0 || self.msgids.len() > 0 || self.msgstrs.len() > 0
     }
     pub fn try_merge(&self, other: &PoEntry<'l>) -> Option<PoEntry<'l>> {
+        if self.has_msgid && other.has_msgid && self.msgids == "" && other.msgids == "" {
+            return Some(self.clone())
+        }
+
         if !self.valid || !other.valid {
             if self.valid && other.valid && self.input == other.input {
                 return Some(self.clone())
@@ -384,7 +373,7 @@ impl<'l> PoEntry<'l> {
         if self.previous_untranslated_strings.len() != other.previous_untranslated_strings.len() || self.previous_untranslated_strings.iter().zip(&other.previous_untranslated_strings).any(|(a, b)| a != b) {
             return None
         }
-        if self.msgids != other.msgids {
+        if self.has_msgid && other.has_msgid && self.msgids != other.msgids {
             return None
         }
         if self.msgstrs != other.msgstrs {
@@ -648,7 +637,7 @@ fn invalid_test() {
 }
 
  #[test]
- fn completet_file_with_valid_content() {
+ fn complete_file_with_valid_content() {
      let mut input = String::new();
      File::open("corpus/clean.po").unwrap().read_to_string(&mut input).unwrap();
      let mut expected = String::new();
@@ -657,7 +646,7 @@ fn invalid_test() {
  }
 
  #[test]
- fn completet_file_with_invalid_content() {
+ fn complete_file_with_path_conflict() {
      let mut input = String::new();
      File::open("corpus/paths.po").unwrap().read_to_string(&mut input).unwrap();
      let mut expected = String::new();
@@ -666,7 +655,15 @@ fn invalid_test() {
  }
 
  #[test]
- fn completet_file_with_invalid_content2() {
+ fn complete_file_with_header_conflict() {
+     let mut input = String::new();
+     File::open("corpus/header.po").unwrap().read_to_string(&mut input).unwrap();
+     let mut expected = String::new();
+     File::open("corpus/header.po.res").unwrap().read_to_string(&mut expected).unwrap();
+     assert_eq!(parse_po_lines(&input).unwrap(), expected);
+ }
+ #[test]
+ fn complete_file_with_invalid_content2() {
      let mut input = String::new();
      File::open("corpus/reorder.po").unwrap().read_to_string(&mut input).unwrap();
      let mut expected = String::new();
