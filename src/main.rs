@@ -1,9 +1,9 @@
 // TODO merge nochange
 // TODO merge Header
 // TODO merge multiple
-// TODO merge strings so that changes in the string splitting can be resolved automatically
 // #~ lines
 // TODO make input a slice
+// TODO bytes instead of strings
 
 extern crate regex;
 #[macro_use] extern crate lazy_static;
@@ -12,6 +12,7 @@ extern crate regex;
 use pretty_assertions::assert_eq;
 
 use std::collections::HashMap;
+use std::fmt::Write;
 use std::fs::File;
 use std::io::Read;
 use regex::Regex;
@@ -58,11 +59,11 @@ struct PoEntry<'l> {
     references: Vec<&'l str>,
     flags: Vec<&'l str>,
     previous_untranslated_strings: Vec<&'l str>,
-    msgctxts: Vec<&'l str>,
-    msgids: Vec<&'l str>,
-    msgid_plurals: Vec<&'l str>,
-    msgstrs: Vec<&'l str>,
-    msgstr_plurals: HashMap<u32, Vec<&'l str>>,
+    msgctxts: String,
+    msgids: String,
+    msgid_plurals: String,
+    msgstrs: String,
+    msgstr_plurals: HashMap<u32, String>,
 }
 
 fn _print_with_title<'l>(title: &str, lines: &Vec<&'l str>, result: &mut String) {
@@ -82,6 +83,47 @@ fn _print_with_title<'l>(title: &str, lines: &Vec<&'l str>, result: &mut String)
     }
 }
 
+fn _append_quoted_string(full_string: &str, current_value: &mut String) {
+    assert!(full_string.len() >= 2, "Invalid quoted string: too short");
+    assert!(&full_string[0..1] == "\"", "Invalid quoted string: no quote at the beginning");
+    assert!(&full_string[full_string.len()-1..] == "\"", "Invalid quoted string: no quote at the end");
+
+    current_value.push_str(&full_string[1..full_string.len()-1]);
+}
+
+#[test]
+fn test_append_quoted_string() {
+    let mut s = String::new();
+    _append_quoted_string("\"foo\\n\"", &mut s);
+    assert_eq!(&s, "foo\\n");
+    _append_quoted_string("\"asdf\"", &mut s);
+    assert_eq!(&s, "foo\\nasdf");
+}
+
+fn _format_as_quoted_string(title: &str, data: &str, result: &mut String) {
+    if data.len() == 0 {
+        return;
+    }
+
+    let parts: Vec<&str> = data.split("\\n").collect();
+    write!(result, "{} ", title).expect("write! works on Strings");
+    for part in parts[0..parts.len()-1].iter() {
+        writeln!(result, "\"{}\\n\"", part).expect("write! works on Strings");
+    }
+    writeln!(result, "\"{}\"", parts.last().unwrap()).expect("write! works on Strings");
+}
+
+#[test]
+fn test_format_as_quoted_string() {
+    let mut result = String::new();
+    _format_as_quoted_string("msgid", "asdf", &mut result);
+    assert_eq!(&result, "msgid \"asdf\"\n");
+
+    let mut result = String::new();
+    _format_as_quoted_string("msgid", "asdf\\nfoo", &mut result);
+    assert_eq!(&result, "msgid \"asdf\\n\"\n\"foo\"\n");
+}
+
 impl<'l> PoEntry<'l> {
     fn new() -> Self {
         PoEntry{
@@ -93,10 +135,10 @@ impl<'l> PoEntry<'l> {
             references: vec!(),
             flags: vec!(),
             previous_untranslated_strings: vec!(),
-            msgctxts: vec!(),
-            msgids: vec!(),
-            msgid_plurals: vec!(),
-            msgstrs: vec!(),
+            msgctxts: String::new(),
+            msgids: String::new(),
+            msgid_plurals: String::new(),
+            msgstrs: String::new(),
             msgstr_plurals: HashMap::new(),
         }
     }
@@ -139,7 +181,7 @@ impl<'l> PoEntry<'l> {
             return;
         }
 
-        self.msgctxts.push(&line[8..]);
+        _append_quoted_string(&line[8..], &mut self.msgctxts);
         self.repeat_type = RepeatType::Msgctxt;
     }
     fn msgid(&mut self, line: &'l str) {
@@ -151,7 +193,7 @@ impl<'l> PoEntry<'l> {
             return;
         }
 
-        self.msgids.push(&line[6..]);
+        _append_quoted_string(&line[6..], &mut self.msgids);
         self.repeat_type = RepeatType::Msgid;
     }
     fn msgid_plural(&mut self, line: &'l str) {
@@ -163,7 +205,7 @@ impl<'l> PoEntry<'l> {
             return;
         }
 
-        self.msgid_plurals.push(&line[13..]);
+        _append_quoted_string(&line[13..], &mut self.msgid_plurals);
         self.repeat_type = RepeatType::MsgidPlural;
     }
     fn msgstr(&mut self, line: &'l str) {
@@ -175,18 +217,18 @@ impl<'l> PoEntry<'l> {
             return;
         }
 
-        self.msgstrs.push(&line[7..]);
+        _append_quoted_string(&line[7..], &mut self.msgstrs);
         self.repeat_type = RepeatType::Msgstr;
     }
     fn _add_plural(&mut self, n: u32, value: &'l str) {
         let plurals = match self.msgstr_plurals.get_mut(&n) {
             Some(v) => v,
             None => {
-                self.msgstr_plurals.insert(n, vec!());
+                self.msgstr_plurals.insert(n, String::new());
                 self.msgstr_plurals.get_mut(&n).unwrap()
             }
         };
-        plurals.push(value);
+        _append_quoted_string(value, plurals);
     }
     fn msgstr_plural(&mut self, line: &'l str) {
         lazy_static! {
@@ -219,10 +261,10 @@ impl<'l> PoEntry<'l> {
         self.input.push('\n');
 
         match self.repeat_type {
-            RepeatType::Msgid => self.msgids.push(line),
-            RepeatType::Msgstr => self.msgstrs.push(line),
-            RepeatType::Msgctxt => self.msgctxts.push(line),
-            RepeatType::MsgidPlural => self.msgid_plurals.push(line),
+            RepeatType::Msgid => _append_quoted_string(line, &mut self.msgids),
+            RepeatType::Msgstr => _append_quoted_string(line, &mut self.msgstrs),
+            RepeatType::Msgctxt => _append_quoted_string(line, &mut self.msgctxts),
+            RepeatType::MsgidPlural => _append_quoted_string(line, &mut self.msgid_plurals),
             RepeatType::MsgstrPlural(n) => self._add_plural(n, &line),
             RepeatType::Invalid => {
                 println!("Warning: Unexpected repeated line {}", line);
@@ -285,7 +327,7 @@ impl<'l> PoEntry<'l> {
         ParseResult::Ok
     }
     pub fn commit(self) -> String {
-        if !self.is_valid() {
+        if !self.valid {
             return self.input;
         }
         let mut result = String::new();
@@ -304,16 +346,17 @@ impl<'l> PoEntry<'l> {
         for previous_untranslated_string in self.previous_untranslated_strings {
             result.push_str(&format!("#| {}\n", previous_untranslated_string));
         }
-        _print_with_title("msgctxt", &self.msgctxts, &mut result);
-        _print_with_title("msgid", &self.msgids, &mut result);
-        _print_with_title("msgid_plural", &self.msgid_plurals, &mut result);
-        _print_with_title("msgstr", &self.msgstrs, &mut result);
+
+        _format_as_quoted_string("msgctxt", &self.msgctxts, &mut result);
+        _format_as_quoted_string("msgid", &self.msgids, &mut result);
+        _format_as_quoted_string("msgid_plural", &self.msgid_plurals, &mut result);
+        _format_as_quoted_string("msgstr", &self.msgstrs, &mut result);
 
         let mut keys: Vec<&u32> = (&self.msgstr_plurals).keys().collect();
         keys.sort();
         for n in keys {
             let lines = &self.msgstr_plurals[n];
-            _print_with_title(&format!("msgstr[{}]", n), &lines, &mut result);
+            _format_as_quoted_string(&format!("msgstr[{}]", n), &lines, &mut result);
         }
 
         return result;
@@ -323,7 +366,7 @@ impl<'l> PoEntry<'l> {
     }
     pub fn try_merge(&self, other: &PoEntry<'l>) -> Option<PoEntry<'l>> {
         if !self.valid || !other.valid {
-            if self.is_valid() && other.is_valid() && self.input == other.input {
+            if self.valid && other.valid && self.input == other.input {
                 return Some(self.clone())
             }
             return None
@@ -341,26 +384,23 @@ impl<'l> PoEntry<'l> {
         if self.previous_untranslated_strings.len() != other.previous_untranslated_strings.len() || self.previous_untranslated_strings.iter().zip(&other.previous_untranslated_strings).any(|(a, b)| a != b) {
             return None
         }
-        if self.msgids.len() != other.msgids.len() || self.msgids.iter().zip(&other.msgids).any(|(a, b)| a != b) {
+        if self.msgids != other.msgids {
             return None
         }
-        if self.msgstrs.len() != other.msgstrs.len() || self.msgstrs.iter().zip(&other.msgstrs).any(|(a, b)| a != b) {
+        if self.msgstrs != other.msgstrs {
             return None
         }
-        if self.msgctxts.len() != other.msgctxts.len() || self.msgctxts.iter().zip(&other.msgctxts).any(|(a, b)| a != b) {
+        if self.msgctxts != other.msgctxts {
             return None
         }
-        if self.msgid_plurals.len() != other.msgid_plurals.len() || self.msgid_plurals.iter().zip(&other.msgid_plurals).any(|(a, b)| a != b) {
+        if self.msgid_plurals != other.msgid_plurals {
             return None
         }
-        if self.msgstr_plurals.len() != other.msgstr_plurals.len() || self.msgstr_plurals.keys().map(|n| (&self.msgstr_plurals[n], other.msgstr_plurals.get(n))).any(|(la, lb)| lb.is_none() || la.len() != lb.unwrap().len() || la.iter().zip(lb.unwrap()).any(|(a, b)| a != b)) {
+        if self.msgstr_plurals.len() != other.msgstr_plurals.len() || self.msgstr_plurals.keys().map(|n| other.msgstr_plurals.get(n).filter(|other| *other == &self.msgstr_plurals[n]).is_some()).any(|b| b) {
             return None
         }
 
         return Some(self.clone())
-    }
-    fn is_valid(&self) -> bool {
-        return self.valid && (self.msgids.len() > 0) && (self.msgstrs.len() > 0 || self.msgstr_plurals.len() > 0)
     }
 }
 
