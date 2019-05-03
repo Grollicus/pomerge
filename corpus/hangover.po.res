@@ -8,11 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-<<<<<<< HEAD
-"POT-Creation-Date: 2019-04-30 17:57+0000\n"
-=======
-"POT-Creation-Date: 1984-01-01 13:37+0000\n"
->>>>>>> b2
+"POT-Creation-Date: 2019-04-30 18:02+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -22,23 +18,31 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: dj/views.py:3
+#: dj/views.py:4
 msgid "text1"
 msgstr "ylo"
 
-#: dj/views.py:4
+#: dj/views.py:5
 msgid "text2"
 msgstr "what"
 
-#: dj/views.py:5
+#: dj/views.py:6
 msgid "text3"
 msgstr "ever"
 
 #: dj/views.py:7
+msgid "leftonly"
+msgstr "w00t"
+
+#: dj/views.py:8
 msgid "text_gettext"
 msgstr "floats"
 
 #: dj/views.py:8
+msgid "rightonly"
+msgstr "bl0rk"
+
+#: dj/views.py:9
 msgid "text_sing"
 msgid_plural "text_pl"
 msgstr[0] "your"

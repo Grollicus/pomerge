@@ -1,5 +1,4 @@
-// TODO merge nochange
-// TODO merge multiple
+// TODO remove duplicates
 // #~ lines
 // TODO make input a slice
 // TODO bytes instead of strings
@@ -479,14 +478,29 @@ impl<'l> Conflict<'l> {
     }
 
     fn try_merge(&self) -> Option<Vec<PoEntry<'l>>> {
+        let mut right_lookup: HashMap<String, &PoEntry<'l>> = HashMap::new();
+        for rs in self.right.iter() {
+            right_lookup.insert(rs.msgids.clone(), &rs);
+        }
+
         let mut res = vec!();
-        for (left, right) in self.left.iter().zip(self.right.iter()) {
-            if let Some(merged) = left.try_merge(right) {
-                res.push(merged);
+        for left in self.left.iter() {
+            if let Some(right) = right_lookup.remove(&left.msgids) {
+                if let Some(merged) = left.try_merge(right) {
+                    res.push(merged);
+                } else {
+                    return None
+                }
             } else {
-                return None
+                res.push(left.clone());
             }
         }
+
+        let old_last = res.pop().expect("Conflict created with an initial PoEntry, should never be empty");
+        for (_, right) in right_lookup.drain() {
+            res.push(right.clone());
+        }
+        res.push(old_last);
         return Some(res);
     }
 
@@ -495,6 +509,7 @@ impl<'l> Conflict<'l> {
             let last_entry = entries.pop().unwrap_or_else(|| PoEntry::new());
             for entry in entries {
                 result.push_str(&entry.commit());
+                result.push('\n');
             }
             return last_entry;
         }
@@ -662,11 +677,21 @@ fn invalid_test() {
      File::open("corpus/header.po.res").unwrap().read_to_string(&mut expected).unwrap();
      assert_eq!(parse_po_lines(&input).unwrap(), expected);
  }
+
  #[test]
- fn complete_file_with_invalid_content2() {
+ fn complete_file_with_reordered_conflict() {
      let mut input = String::new();
      File::open("corpus/reorder.po").unwrap().read_to_string(&mut input).unwrap();
      let mut expected = String::new();
      File::open("corpus/reorder.po.res").unwrap().read_to_string(&mut expected).unwrap();
+     assert_eq!(parse_po_lines(&input).unwrap(), expected);
+ }
+
+ #[test]
+ fn complete_file_with_reordered_conflict_with_hangover() {
+     let mut input = String::new();
+     File::open("corpus/hangover.po").unwrap().read_to_string(&mut input).unwrap();
+     let mut expected = String::new();
+     File::open("corpus/hangover.po.res").unwrap().read_to_string(&mut expected).unwrap();
      assert_eq!(parse_po_lines(&input).unwrap(), expected);
  }
