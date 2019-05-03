@@ -65,7 +65,7 @@ fn test_append_quoted_string() {
 }
 
 fn _format_as_quoted_string(title: &str, data: &str, result: &mut String) {
-    if data.len() == 0 {
+    if data.is_empty() {
         return;
     }
 
@@ -158,7 +158,7 @@ impl<'l> PoEntry<'l> {
     fn msgctxt(&mut self, line: &'l str) {
         self.input.push_str(line);
         self.input.push('\n');
-        if self.msgctxts.len() != 0 {
+        if !self.msgctxts.is_empty() {
             println!("Warning: Repeated msgctxt in line {}", line);
             self.valid = false;
             return;
@@ -183,7 +183,7 @@ impl<'l> PoEntry<'l> {
     fn msgid_plural(&mut self, line: &'l str) {
         self.input.push_str(line);
         self.input.push('\n');
-        if self.msgid_plurals.len() != 0 {
+        if !self.msgid_plurals.is_empty() {
             println!("Warning: Repeated msgid_plural in line {}", line);
             self.valid = false;
             return;
@@ -195,7 +195,7 @@ impl<'l> PoEntry<'l> {
     fn msgstr(&mut self, line: &'l str) {
         self.input.push_str(line);
         self.input.push('\n');
-        if self.msgstrs.len() != 0 {
+        if !self.msgstrs.is_empty() {
             println!("Warning: Repeated msgstr in line {}", line);
             self.valid = false;
             return;
@@ -265,7 +265,7 @@ impl<'l> PoEntry<'l> {
             return ParseResult::NextEntry
         }
 
-        if line.len() > 0 && &line[0..1] == "\"" {
+        if !line.is_empty() && &line[0..1] == "\"" {
             self.repeat(line);
             return ParseResult::Ok;
         }
@@ -343,10 +343,10 @@ impl<'l> PoEntry<'l> {
             _format_as_quoted_string(&format!("msgstr[{}]", n), &lines, &mut result);
         }
 
-        return result;
+        result
     }
     pub fn has_content(&self) -> bool {
-        return self.translator_comments.len() > 0 || self.extracted_comments.len() > 0 || self.references.len() > 0 || self.flags.len() > 0 || self.previous_untranslated_strings.len() > 0 || self.msgids.len() > 0 || self.msgstrs.len() > 0
+        !self.translator_comments.is_empty() || !self.extracted_comments.is_empty() || !self.references.is_empty() || !self.flags.is_empty() || !self.previous_untranslated_strings.is_empty() || !self.msgids.is_empty() || !self.msgstrs.is_empty()
     }
     pub fn try_merge(&self, other: &PoEntry<'l>) -> Option<PoEntry<'l>> {
         if self.has_msgid && other.has_msgid && self.msgids == "" && other.msgids == "" {
@@ -388,7 +388,7 @@ impl<'l> PoEntry<'l> {
             return None
         }
 
-        return Some(self.clone())
+        Some(self.clone())
     }
 }
 
@@ -453,7 +453,7 @@ impl<'l> Conflict<'l> {
         if self.left.last_mut().unwrap().parse_line(line) == ParseResult::NextEntry {
             self.left.push(PoEntry::new());
         }
-        return ParseResult::Ok;
+        ParseResult::Ok
     }
 
     fn parse_right(&mut self, line: &'l str) -> ParseResult {
@@ -463,7 +463,7 @@ impl<'l> Conflict<'l> {
         if self.right.last_mut().unwrap().parse_line(line) == ParseResult::NextEntry {
             self.right.push(PoEntry::new());
         }
-        return ParseResult::Ok;
+        ParseResult::Ok
     }
 
     fn parse_line(&mut self, line: &'l str) -> ParseResult {
@@ -474,7 +474,7 @@ impl<'l> Conflict<'l> {
             self.position = ConflictPosition::Right;
             return ParseResult::Ok;
         }
-        return self.parse_right(line);
+        self.parse_right(line)
     }
 
     fn try_merge(&self) -> Option<Vec<PoEntry<'l>>> {
@@ -501,12 +501,12 @@ impl<'l> Conflict<'l> {
             res.push(right.clone());
         }
         res.push(old_last);
-        return Some(res);
+        Some(res)
     }
 
     fn commit(self, result: &mut  String) -> PoEntry<'l> {
         if let Some(mut entries) = self.try_merge() {
-            let last_entry = entries.pop().unwrap_or_else(|| PoEntry::new());
+            let last_entry = entries.pop().unwrap_or_else(PoEntry::new);
             for entry in entries {
                 result.push_str(&entry.commit());
                 result.push('\n');
@@ -514,7 +514,7 @@ impl<'l> Conflict<'l> {
             return last_entry;
         }
         result.push_str(&self.input);
-        return PoEntry::new();
+        PoEntry::new()
     }
 }
 
@@ -570,7 +570,7 @@ fn main() -> Result<(), MyErr> {
     File::open(&argv[1])?.read_to_string(&mut file_content)?;
     print!("{}", parse_po_lines(&file_content)?);
 
-    return Ok(())
+    Ok(())
 }
 
 #[test]
