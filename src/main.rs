@@ -284,11 +284,11 @@ impl<'l> PoEntry<'l> {
 
         ParseResult::Ok
     }
-    pub fn commit(self, result: &mut String) {
+    pub fn commit(self) -> String {
         if !self.is_valid() {
-            result.push_str(&self.input);
-            return;
+            return self.input;
         }
+        let mut result = String::new();
         for translator_comment in self.translator_comments {
             result.push_str(&format!("#  {}\n", translator_comment));
         }
@@ -304,17 +304,19 @@ impl<'l> PoEntry<'l> {
         for previous_untranslated_string in self.previous_untranslated_strings {
             result.push_str(&format!("#| {}\n", previous_untranslated_string));
         }
-        _print_with_title("msgctxt", &self.msgctxts, result);
-        _print_with_title("msgid", &self.msgids, result);
-        _print_with_title("msgid_plural", &self.msgid_plurals, result);
-        _print_with_title("msgstr", &self.msgstrs, result);
+        _print_with_title("msgctxt", &self.msgctxts, &mut result);
+        _print_with_title("msgid", &self.msgids, &mut result);
+        _print_with_title("msgid_plural", &self.msgid_plurals, &mut result);
+        _print_with_title("msgstr", &self.msgstrs, &mut result);
 
         let mut keys: Vec<&u32> = (&self.msgstr_plurals).keys().collect();
         keys.sort();
         for n in keys {
             let lines = &self.msgstr_plurals[n];
-            _print_with_title(&format!("msgstr[{}]", n), &lines, result);
+            _print_with_title(&format!("msgstr[{}]", n), &lines, &mut result);
         }
+
+        return result;
     }
     pub fn has_content(&self) -> bool {
         return self.translator_comments.len() > 0 || self.extracted_comments.len() > 0 || self.references.len() > 0 || self.flags.len() > 0 || self.previous_untranslated_strings.len() > 0 || self.msgids.len() > 0 || self.msgstrs.len() > 0
@@ -385,9 +387,7 @@ fn test_poentry_try_merge() {
         assert_eq!(a.valid, valida);
         assert_eq!(b.valid, validb);
         if let Some(expected_str) = expected_result {
-            let mut output = String::new();
-            a.try_merge(&b).unwrap().commit(&mut output);
-            assert_eq!(expected_str, output);
+            assert_eq!(expected_str, a.try_merge(&b).unwrap().commit());
         } else {
             assert!(a.try_merge(&b).is_none());
         }
@@ -465,12 +465,11 @@ impl<'l> Conflict<'l> {
         if let Some(mut entries) = self.try_merge() {
             let last_entry = entries.pop().unwrap_or_else(|| PoEntry::new());
             for entry in entries {
-                entry.commit(result);
+                result.push_str(&entry.commit());
             }
             return last_entry;
         }
         result.push_str(&self.input);
-        // *current_entry = PoEntry::new(); // TODO
         return PoEntry::new();
     }
 }
@@ -502,7 +501,7 @@ pub fn parse_po_lines(lines: &str) -> Result<String, MyErr> {
                 continue;
             }
             if current_entry.parse_line(line) == ParseResult::NextEntry {
-                current_entry.commit(&mut result);
+                result.push_str(&current_entry.commit());
                 result.push_str(line);
                 result.push('\n');
                 current_entry = PoEntry::new();
@@ -511,7 +510,7 @@ pub fn parse_po_lines(lines: &str) -> Result<String, MyErr> {
     };
 
     if current_entry.has_content() {
-        current_entry.commit(&mut result);
+        result.push_str(&current_entry.commit());
     }
 
     Ok(result)
@@ -544,9 +543,7 @@ fn simple_parser_test() {
     assert!(po_entry.valid);
     assert_eq!(po_entry.parse_line(""), ParseResult::NextEntry);
 
-    let mut output = String::new();
-    po_entry.commit(&mut output);
-
+    let output = po_entry.commit();
     let res: Vec<&str> = output.lines().collect();
     assert_eq!(res[0], "msgid \"foo\"");
     assert_eq!(res[1], "msgstr \"bar\"");
@@ -575,10 +572,7 @@ fn full_parser_test() {
     assert!(po_entry.valid);
     assert_eq!(po_entry.parse_line(""), ParseResult::NextEntry);
 
-    let mut output = String::new();
-    po_entry.commit(&mut output);
-
-    println!("Output: {}", output);
+    let output = po_entry.commit();
     let res: Vec<&str> = output.lines().collect();
     assert_eq!(res[0], "#  translator-comment");
     assert_eq!(res[1], "#  some_other_comment");
@@ -606,9 +600,7 @@ fn invalid_test() {
     }
     assert!(!po_entry.valid);
 
-    let mut output = String::new();
-    po_entry.commit(&mut output);
-
+    let output = po_entry.commit();
     let res: Vec<&str> = output.lines().collect();
     assert_eq!(res[0], "msgid \"foo\"");
     assert_eq!(res[1], "somethingelse \"bar\"");
