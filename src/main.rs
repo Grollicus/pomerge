@@ -1,6 +1,8 @@
 // TODO remove duplicates
 // #~ lines
 // TODO make input a slice
+// TODO more tests for try_merge
+// TODO support trailing text of a PoEntry after a merge
 
 extern crate regex;
 #[macro_use]
@@ -784,10 +786,10 @@ fn complete_file_with_reordered_conflict() {
 }
 
 #[test]
-fn complete_file_with_reordered_conflict_with_hangover() {
+fn complete_file_with_reordered_conflict_with_elements_only_on_one_side() {
     let mut input: Vec<u8> = vec![];
-    File::open("corpus/hangover.po").unwrap().read_to_end(&mut input).unwrap();
+    File::open("corpus/elements_only_on_one_side.po").unwrap().read_to_end(&mut input).unwrap();
     let mut expected: Vec<u8> = vec![];
-    File::open("corpus/hangover.po.res").unwrap().read_to_end(&mut expected).unwrap();
+    File::open("corpus/elements_only_on_one_side.po.res").unwrap().read_to_end(&mut expected).unwrap();
     assert_eq!(parse_po_lines(&input).unwrap(), expected);
 }
