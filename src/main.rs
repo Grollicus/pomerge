@@ -1,4 +1,3 @@
-// TODO remove duplicates
 // #~ lines
 // TODO make input a slice
 // TODO more tests for try_merge
@@ -368,50 +367,58 @@ impl<'l> PoEntry<'l> {
 
         ParseResult::Ok
     }
-    pub fn commit(self) -> Vec<u8> {
-        if !self.valid {
-            return self.input;
+    pub fn commit(self, known_msgids: & mut HashMap<Vec<u8>, PoEntry<'l>>, result: &mut Vec<u8>) -> bool {
+        if self.has_msgid {
+            if let Some(other) = known_msgids.get(&self.msgids) {
+                if self.try_merge(&other).is_some() {
+                    return false;
+                }
+            }
         }
-        let mut result = vec![];
-        for translator_comment in self.translator_comments {
+        known_msgids.insert(self.msgids.clone(), self.clone());
+        if !self.valid {
+            result.extend(self.input);
+            return true;
+        }
+        for translator_comment in self.translator_comments.iter() {
             result.extend_from_slice(b"#  ");
             result.extend_from_slice(translator_comment);
             result.push(b'\n');
         }
-        for extracted_comment in self.extracted_comments {
+        for extracted_comment in self.extracted_comments.iter() {
             result.extend_from_slice(b"#. ");
             result.extend_from_slice(extracted_comment);
             result.push(b'\n');
         }
-        for reference in self.references {
+        for reference in self.references.iter() {
             result.extend_from_slice(b"#: ");
             result.extend_from_slice(reference);
             result.push(b'\n');
         }
-        for flag in self.flags {
+        for flag in self.flags.iter() {
             result.extend_from_slice(b"#, ");
             result.extend_from_slice(flag);
             result.push(b'\n');
         }
-        for previous_untranslated_string in self.previous_untranslated_strings {
+        for previous_untranslated_string in self.previous_untranslated_strings.iter() {
             result.extend_from_slice(b"#| ");
             result.extend_from_slice(previous_untranslated_string);
             result.push(b'\n');
         }
 
-        _format_as_quoted_string(b"msgctxt", &self.msgctxts, &mut result);
-        _format_as_quoted_string(b"msgid", &self.msgids, &mut result);
-        _format_as_quoted_string(b"msgid_plural", &self.msgid_plurals, &mut result);
-        _format_as_quoted_string(b"msgstr", &self.msgstrs, &mut result);
+        _format_as_quoted_string(b"msgctxt", &self.msgctxts, result);
+        _format_as_quoted_string(b"msgid", &self.msgids, result);
+        _format_as_quoted_string(b"msgid_plural", &self.msgid_plurals, result);
+        _format_as_quoted_string(b"msgstr", &self.msgstrs, result);
 
         let mut keys: Vec<&u32> = (&self.msgstr_plurals).keys().collect();
         keys.sort();
         for n in keys {
             let lines = &self.msgstr_plurals[n];
-            _format_as_quoted_string(format!("msgstr[{}]", n).as_bytes(), &lines, &mut result);
+            _format_as_quoted_string(format!("msgstr[{}]", n).as_bytes(), &lines, result);
         }
 
-        result
+        true
     }
     pub fn has_content(&self) -> bool {
         !self.translator_comments.is_empty()
@@ -428,7 +435,7 @@ impl<'l> PoEntry<'l> {
         }
 
         if !self.valid || !other.valid {
-            if self.valid && other.valid && self.input == other.input {
+            if !self.valid && !other.valid && self.input == other.input {
                 return Some(self.clone());
             }
             return None;
@@ -510,7 +517,8 @@ fn test_poentry_try_merge() {
         assert_eq!(a.valid, valida);
         assert_eq!(b.valid, validb);
         if let Some(expected_str) = expected_result {
-            let res = a.try_merge(&b).unwrap().commit();
+            let mut res : Vec<u8> = vec![];
+            assert!(a.try_merge(&b).unwrap().commit(&mut HashMap::new(), &mut res));
             assert_eq!(expected_str, &res[..]);
         } else {
             assert!(a.try_merge(&b).is_none());
@@ -569,8 +577,10 @@ impl<'l> Conflict<'l> {
         self.input.extend(line);
         self.input.push(b'\n');
 
-        if self.position == ConflictPosition::Left && self.parse_left(line) == ParseResult::NextEntry {
-            self.position = ConflictPosition::Right;
+        if self.position == ConflictPosition::Left {
+            if self.parse_left(line) == ParseResult::NextEntry {
+                self.position = ConflictPosition::Right;
+            }
             return ParseResult::Ok;
         }
         self.parse_right(line)
@@ -603,12 +613,13 @@ impl<'l> Conflict<'l> {
         Some(res)
     }
 
-    fn commit(self, result: &mut Vec<u8>) -> PoEntry<'l> {
+    fn commit(self, known_msgids: &mut HashMap<Vec<u8>, PoEntry<'l>>, result: &mut Vec<u8>) -> PoEntry<'l> {
         if let Some(mut entries) = self.try_merge() {
             let last_entry = entries.pop().unwrap_or_else(PoEntry::new);
             for entry in entries {
-                result.extend(&entry.commit());
-                result.push(b'\n');
+                if entry.commit(known_msgids, result) {
+                    result.push(b'\n');
+                }
             }
             return last_entry;
         }
@@ -629,13 +640,14 @@ pub fn parse_po_lines(file_content: &Vec<u8>) -> Result<Vec<u8>, MyErr> {
     let mut result: Vec<u8> = vec![];
     let mut current_entry = PoEntry::new();
     let mut current_conflict: Option<Conflict> = None;
+    let mut known_msgids : HashMap<Vec<u8>, PoEntry> = HashMap::new();
 
     for line in file_content.split(|&c| c == b'\n') {
         if let Some(mut conflict) = current_conflict {
             if conflict.parse_line(line) == ParseResult::Ok {
                 current_conflict = Some(conflict);
             } else {
-                current_entry = conflict.commit(&mut result);
+                current_entry = conflict.commit(&mut known_msgids, &mut result);
                 current_conflict = None;
             }
         } else {
@@ -644,16 +656,16 @@ pub fn parse_po_lines(file_content: &Vec<u8>) -> Result<Vec<u8>, MyErr> {
                 continue;
             }
             if current_entry.parse_line(line) == ParseResult::NextEntry {
-                result.extend(&current_entry.commit());
-                result.push(b'\n');
-                result.extend_from_slice(line);
+                if current_entry.commit(&mut known_msgids, &mut result) {
+                    result.push(b'\n');
+                    result.extend_from_slice(line);
+                }
                 current_entry = PoEntry::new();
             }
         }
     }
 
-    if current_entry.has_content() {
-        result.extend(&current_entry.commit());
+    if current_entry.has_content() && current_entry.commit(&mut known_msgids, &mut result) {
         result.push(b'\n');
     }
 
@@ -691,7 +703,8 @@ fn simple_parser_test() {
     assert!(po_entry.valid);
     assert_eq!(po_entry.parse_line(b""), ParseResult::NextEntry);
 
-    let output = po_entry.commit();
+    let mut output = vec![];
+    assert!(po_entry.commit(&mut HashMap::new(), &mut output));
     assert_eq!(output, b"msgid \"foo\"\nmsgstr \"bar\"\n");
 }
 
@@ -718,7 +731,8 @@ fn full_parser_test() {
     assert!(po_entry.valid);
     assert_eq!(po_entry.parse_line(b""), ParseResult::NextEntry);
 
-    let output = po_entry.commit();
+    let mut output = vec![];
+    assert!(po_entry.commit(&mut HashMap::new(), &mut output));
     let res: Vec<&[u8]> = output.split(|&c| c == b'\n').collect();
     assert_eq!(res[0], b"#  translator-comment");
     assert_eq!(res[1], b"#  some_other_comment");
@@ -742,7 +756,8 @@ fn invalid_test() {
     }
     assert!(!po_entry.valid);
 
-    let output = po_entry.commit();
+    let mut output = vec![];
+    assert!(po_entry.commit(&mut HashMap::new(), &mut output));
     let res: Vec<&[u8]> = output.split(|&c| c == b'\n').collect();
     assert_eq!(res[0], b"msgid \"foo\"");
     assert_eq!(res[1], b"somethingelse \"bar\"");
@@ -792,4 +807,23 @@ fn complete_file_with_reordered_conflict_with_elements_only_on_one_side() {
     let mut expected: Vec<u8> = vec![];
     File::open("corpus/elements_only_on_one_side.po.res").unwrap().read_to_end(&mut expected).unwrap();
     assert_eq!(parse_po_lines(&input).unwrap(), expected);
+}
+
+#[test]
+fn poentry_skip_duplicates() {
+    let mut input: Vec<u8> = vec![];
+    File::open("corpus/duplicates.po").unwrap().read_to_end(&mut input).unwrap();
+    let mut expected: Vec<u8> = vec![];
+    File::open("corpus/duplicates.po.res").unwrap().read_to_end(&mut expected).unwrap();
+    assert_eq!(parse_po_lines(&input).unwrap(), expected);
+}
+
+#[test]
+fn poentry_skip_duplicates_conflict() {
+    let mut input: Vec<u8> = vec![];
+    File::open("corpus/duplicates_conflict.po").unwrap().read_to_end(&mut input).unwrap();
+    let mut expected: Vec<u8> = vec![];
+    File::open("corpus/duplicates_conflict.po.res").unwrap().read_to_end(&mut expected).unwrap();
+    let result = parse_po_lines(&input).unwrap();
+    assert_eq!(String::from_utf8(result).unwrap(), String::from_utf8(expected).unwrap());
 }
