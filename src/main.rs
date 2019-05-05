@@ -12,7 +12,7 @@ use pretty_assertions::assert_eq;
 use regex::bytes::{Regex, Captures};
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{Read, Write, self};
+use std::io::{Read, Write};
 use std::str::from_utf8;
 
 #[derive(Debug)]
@@ -678,7 +678,7 @@ fn test_conflict_marker_parsing() {
     assert_eq!(c.parse_right(b">>>>>>> "), ParseResult::NextEntry)
 }
 
-pub fn parse_po_lines(file_content: &Vec<u8>) -> Result<Vec<u8>, MyErr> {
+pub fn parse_po_lines(file_content: &Vec<u8>) -> Vec<u8> {
     let mut result: Vec<u8> = vec![];
     let mut current_entry = PoEntry::new();
     let mut current_conflict: Option<Conflict> = None;
@@ -715,21 +715,52 @@ pub fn parse_po_lines(file_content: &Vec<u8>) -> Result<Vec<u8>, MyErr> {
         result.pop();
     }
 
-    Ok(result)
+    result
+}
+
+fn usage() {
+    println!("Usage: {} <file>..", std::env::args().next().unwrap_or(String::from("pomerge")));
+    println!("Resolves git-style merge conflicts in PO files.");
+    std::process::exit(1);
 }
 
 fn main() -> Result<(), MyErr> {
     let argv: Vec<String> = std::env::args().collect();
     if argv.len() < 2 {
-        panic!("Missing Argument Filename");
+        usage();
     }
 
-    let mut bytes : Vec<u8> = vec![];
-    File::open(&argv[1])?.read_to_end(&mut bytes)?;
+    for fname in &argv[1..] {
+        let mut file_content : Vec<u8> = vec![];
 
-    let stdout = io::stdout();
-    let mut handle = stdout.lock();
-    handle.write_all(&parse_po_lines(&bytes)?)?;
+        {
+            let mut file = match File::open(fname) {
+                Err(e) => { eprintln!("Could not open {}: {:?}", fname, e); continue; }
+                Ok(file) => {
+                    file
+                }
+            };
+
+            if let Err(e) = file.read_to_end(&mut file_content) {
+                eprintln!("Read from {} failed: {:?}", fname, e);
+                continue;
+            }
+        }
+
+        let result = parse_po_lines(&file_content);
+
+        {
+            let mut file = match File::create(fname) {
+                Err(e) => { eprintln!("Could not open {}: {:?}", fname, e); continue; }
+                Ok(file) => { file }
+            };
+            if let Err(e) = file.write_all(&result) {
+                eprintln!("Write to {} failed: {:?}", fname, e);
+                continue;
+            }
+        }
+
+    }
 
     Ok(())
 }
@@ -830,7 +861,7 @@ fn complete_file_with_valid_content() {
     File::open("corpus/clean.po").unwrap().read_to_end(&mut input).unwrap();
     let mut expected: Vec<u8> = vec![];
     File::open("corpus/clean.po.res").unwrap().read_to_end(&mut expected).unwrap();
-    assert_eq!(parse_po_lines(&input).unwrap(), expected);
+    assert_eq!(parse_po_lines(&input), expected);
 }
 
 #[test]
@@ -839,7 +870,7 @@ fn complete_file_with_path_conflict() {
     File::open("corpus/paths.po").unwrap().read_to_end(&mut input).unwrap();
     let mut expected: Vec<u8> = vec![];
     File::open("corpus/paths.po.res").unwrap().read_to_end(&mut expected).unwrap();
-    assert_eq!(parse_po_lines(&input).unwrap(), expected);
+    assert_eq!(parse_po_lines(&input), expected);
 }
 
 #[test]
@@ -848,7 +879,7 @@ fn complete_file_with_header_conflict() {
     File::open("corpus/header.po").unwrap().read_to_end(&mut input).unwrap();
     let mut expected: Vec<u8> = vec![];
     File::open("corpus/header.po.res").unwrap().read_to_end(&mut expected).unwrap();
-    assert_eq!(parse_po_lines(&input).unwrap(), expected);
+    assert_eq!(parse_po_lines(&input), expected);
 }
 
 #[test]
@@ -857,7 +888,7 @@ fn complete_file_with_reordered_conflict() {
     File::open("corpus/reorder.po").unwrap().read_to_end(&mut input).unwrap();
     let mut expected: Vec<u8> = vec![];
     File::open("corpus/reorder.po.res").unwrap().read_to_end(&mut expected).unwrap();
-    assert_eq!(parse_po_lines(&input).unwrap(), expected);
+    assert_eq!(parse_po_lines(&input), expected);
 }
 
 #[test]
@@ -866,7 +897,7 @@ fn complete_file_with_reordered_conflict_with_elements_only_on_one_side() {
     File::open("corpus/elements_only_on_one_side.po").unwrap().read_to_end(&mut input).unwrap();
     let mut expected: Vec<u8> = vec![];
     File::open("corpus/elements_only_on_one_side.po.res").unwrap().read_to_end(&mut expected).unwrap();
-    assert_eq!(parse_po_lines(&input).unwrap(), expected);
+    assert_eq!(parse_po_lines(&input), expected);
 }
 
 #[test]
@@ -875,7 +906,7 @@ fn poentry_skip_duplicates() {
     File::open("corpus/duplicates.po").unwrap().read_to_end(&mut input).unwrap();
     let mut expected: Vec<u8> = vec![];
     File::open("corpus/duplicates.po.res").unwrap().read_to_end(&mut expected).unwrap();
-    assert_eq!(parse_po_lines(&input).unwrap(), expected);
+    assert_eq!(parse_po_lines(&input), expected);
 }
 
 #[test]
@@ -884,7 +915,7 @@ fn poentry_skip_duplicates_conflict() {
     File::open("corpus/duplicates_conflict.po").unwrap().read_to_end(&mut input).unwrap();
     let mut expected: Vec<u8> = vec![];
     File::open("corpus/duplicates_conflict.po.res").unwrap().read_to_end(&mut expected).unwrap();
-    let result = parse_po_lines(&input).unwrap();
+    let result = parse_po_lines(&input);
     assert_eq!(String::from_utf8(result).unwrap(), String::from_utf8(expected).unwrap());
 }
 
@@ -894,6 +925,6 @@ fn poentry_repeat_duplicate_without_tilde() {
     File::open("corpus/duplicates_without_tilde.po").unwrap().read_to_end(&mut input).unwrap();
     let mut expected: Vec<u8> = vec![];
     File::open("corpus/duplicates_without_tilde.po.res").unwrap().read_to_end(&mut expected).unwrap();
-    let result = parse_po_lines(&input).unwrap();
+    let result = parse_po_lines(&input);
     assert_eq!(String::from_utf8(result).unwrap(), String::from_utf8(expected).unwrap());
 }
