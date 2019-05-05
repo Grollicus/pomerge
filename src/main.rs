@@ -1,4 +1,3 @@
-// #~ lines
 // TODO make input a slice
 // TODO more tests for try_merge
 // TODO support trailing text of a PoEntry after a merge
@@ -116,18 +115,24 @@ fn test_split_by_newline() {
 
 }
 
-fn _format_as_quoted_string(title: &[u8], data: &[u8], result: &mut Vec<u8>) {
+fn _format_as_quoted_string(title: &[u8], data: &[u8], add_tilde: bool, result: &mut Vec<u8>) {
     if data.is_empty() {
         return;
     }
 
     let parts: Vec<&[u8]> = LinearTokenizer::new(data, b"\\n").collect();
+    if add_tilde {
+        result.extend_from_slice(b"#~ ");
+    }
     result.extend_from_slice(title);
     result.push(b' ');
     for part in parts[0..parts.len() - 1].iter() {
         result.push(b'"');
         result.extend_from_slice(part);
         result.extend_from_slice(b"\\n\"\n");
+        if add_tilde {
+            result.extend_from_slice(b"#~ ");
+        }
     }
     result.push(b'"');
     result.extend_from_slice(parts.last().expect("nonempty"));
@@ -137,17 +142,59 @@ fn _format_as_quoted_string(title: &[u8], data: &[u8], result: &mut Vec<u8>) {
 #[test]
 fn test_format_as_quoted_string() {
     let mut result = vec![];
-    _format_as_quoted_string(b"msgid", b"asdf", &mut result);
+    _format_as_quoted_string(b"msgid", b"asdf", false, &mut result);
     assert_eq!(&result, b"msgid \"asdf\"\n");
 
     let mut result = vec![];
-    _format_as_quoted_string(b"msgid", b"asdf\\nfoo", &mut result);
+    _format_as_quoted_string(b"msgid", b"asdf", true, &mut result);
+    assert_eq!(&result, b"#~ msgid \"asdf\"\n");
+
+    let mut result = vec![];
+    _format_as_quoted_string(b"msgid", b"asdf\\nfoo", false, &mut result);
     assert_eq!(&result, b"msgid \"asdf\\n\"\n\"foo\"\n");
+
+    let mut result = vec![];
+    _format_as_quoted_string(b"msgid", b"asdf\\nfoo", true, &mut result);
+    assert_eq!(&result, b"#~ msgid \"asdf\\n\"\n#~ \"foo\"\n");
+}
+
+fn _append_prefixed_list(prefix: &[u8], lines: &Vec<&[u8]>, add_tilde: bool, result: &mut Vec<u8>) {
+    for line in lines {
+        if add_tilde {
+            result.extend_from_slice(b"#~ ");
+        }
+        result.extend_from_slice(prefix);
+        result.extend_from_slice(line);
+        result.push(b'\n');
+    }
+}
+
+#[test]
+fn test_append_prefixed_list() {
+    let mut result = vec![];
+    let lines: Vec<&[u8]> = vec![
+        b"foo",
+        b"bar",
+    ];
+    _append_prefixed_list(b"#  ", &lines, false, &mut result);
+    assert_eq!(&result, b"#  foo\n#  bar\n");
+
+    result = vec![];
+    _append_prefixed_list(b"#  ", &lines, true, &mut result);
+    assert_eq!(&result, b"#~ #  foo\n#~ #  bar\n");
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum TildeMode {
+    Yes,
+    No,
+    Undefined,
 }
 
 #[derive(Clone, Debug)]
 struct PoEntry<'l> {
     valid: bool,
+    tilde: TildeMode,
     repeat_type: RepeatType,
     input: Vec<u8>,
     translator_comments: Vec<&'l [u8]>,
@@ -167,6 +214,7 @@ impl<'l> PoEntry<'l> {
     fn new() -> Self {
         PoEntry {
             valid: true,
+            tilde: TildeMode::Undefined,
             repeat_type: RepeatType::Invalid,
             input: vec![],
             translator_comments: vec![],
@@ -313,13 +361,22 @@ impl<'l> PoEntry<'l> {
             }
         }
     }
-    pub fn parse_line(&mut self, line: &'l [u8]) -> ParseResult {
+    pub fn parse_line(&mut self, mut line: &'l [u8]) -> ParseResult {
         lazy_static! {
             static ref WHITESPACE: Regex = Regex::new(r"^\s*$").expect("Valid WHITESPACE Regex");
         }
 
         if WHITESPACE.is_match(&line) {
             return ParseResult::NextEntry;
+        }
+
+        if line.len() >= 3 && &line[0..3] == b"#~ " {
+            assert!(self.tilde != TildeMode::No, "Found a tilde line in a non-tilde entry!");
+            self.tilde = TildeMode::Yes;
+            line = &line[3..];
+        } else {
+            assert!(self.tilde != TildeMode::Yes, "Found a non-tilde line in a tilde entry!");
+            self.tilde = TildeMode::No;
         }
 
         if !line.is_empty() && &line[0..1] == b"\"" {
@@ -370,52 +427,33 @@ impl<'l> PoEntry<'l> {
     pub fn commit(self, known_msgids: & mut HashMap<Vec<u8>, PoEntry<'l>>, result: &mut Vec<u8>) -> bool {
         if self.has_msgid {
             if let Some(other) = known_msgids.get(&self.msgids) {
-                if self.try_merge(&other).is_some() {
+                if self.try_merge(&other).is_some() && (self.tilde == TildeMode::Yes || self.tilde == other.tilde) {
                     return false;
                 }
             }
         }
         known_msgids.insert(self.msgids.clone(), self.clone());
+
         if !self.valid {
             result.extend(self.input);
             return true;
         }
-        for translator_comment in self.translator_comments.iter() {
-            result.extend_from_slice(b"#  ");
-            result.extend_from_slice(translator_comment);
-            result.push(b'\n');
-        }
-        for extracted_comment in self.extracted_comments.iter() {
-            result.extend_from_slice(b"#. ");
-            result.extend_from_slice(extracted_comment);
-            result.push(b'\n');
-        }
-        for reference in self.references.iter() {
-            result.extend_from_slice(b"#: ");
-            result.extend_from_slice(reference);
-            result.push(b'\n');
-        }
-        for flag in self.flags.iter() {
-            result.extend_from_slice(b"#, ");
-            result.extend_from_slice(flag);
-            result.push(b'\n');
-        }
-        for previous_untranslated_string in self.previous_untranslated_strings.iter() {
-            result.extend_from_slice(b"#| ");
-            result.extend_from_slice(previous_untranslated_string);
-            result.push(b'\n');
-        }
+        _append_prefixed_list(b"#  ", &self.translator_comments, self.tilde == TildeMode::Yes, result);
+        _append_prefixed_list(b"#. ", &self.extracted_comments, self.tilde == TildeMode::Yes, result);
+        _append_prefixed_list(b"#: ", &self.references, self.tilde == TildeMode::Yes, result);
+        _append_prefixed_list(b"#, ", &self.flags, self.tilde == TildeMode::Yes, result);
+        _append_prefixed_list(b"#| ", &self.previous_untranslated_strings, self.tilde == TildeMode::Yes, result);
 
-        _format_as_quoted_string(b"msgctxt", &self.msgctxts, result);
-        _format_as_quoted_string(b"msgid", &self.msgids, result);
-        _format_as_quoted_string(b"msgid_plural", &self.msgid_plurals, result);
-        _format_as_quoted_string(b"msgstr", &self.msgstrs, result);
+        _format_as_quoted_string(b"msgctxt", &self.msgctxts, self.tilde == TildeMode::Yes, result);
+        _format_as_quoted_string(b"msgid", &self.msgids, self.tilde == TildeMode::Yes, result);
+        _format_as_quoted_string(b"msgid_plural", &self.msgid_plurals, self.tilde == TildeMode::Yes, result);
+        _format_as_quoted_string(b"msgstr", &self.msgstrs, self.tilde == TildeMode::Yes, result);
 
         let mut keys: Vec<&u32> = (&self.msgstr_plurals).keys().collect();
         keys.sort();
         for n in keys {
             let lines = &self.msgstr_plurals[n];
-            _format_as_quoted_string(format!("msgstr[{}]", n).as_bytes(), &lines, result);
+            _format_as_quoted_string(format!("msgstr[{}]", n).as_bytes(), &lines, self.tilde == TildeMode::Yes, result);
         }
 
         true
@@ -484,7 +522,11 @@ impl<'l> PoEntry<'l> {
             return None;
         }
 
-        Some(self.clone())
+        if self.tilde == TildeMode::Yes && other.tilde == TildeMode::No {
+            Some(other.clone())
+        } else {
+            Some(self.clone())
+        }
     }
 }
 
@@ -701,11 +743,29 @@ fn simple_parser_test() {
         assert_eq!(po_entry.parse_line(line), ParseResult::Ok)
     }
     assert!(po_entry.valid);
+    assert_eq!(po_entry.tilde, TildeMode::No);
     assert_eq!(po_entry.parse_line(b""), ParseResult::NextEntry);
 
     let mut output = vec![];
     assert!(po_entry.commit(&mut HashMap::new(), &mut output));
     assert_eq!(output, b"msgid \"foo\"\nmsgstr \"bar\"\n");
+}
+
+#[test]
+fn tile_parser_test() {
+    let src : Vec<&[u8]> = vec![b"#~ msgid \"foo\"", b"#~ msgstr \"bar\""];
+
+    let mut po_entry = PoEntry::new();
+    for line in src {
+        assert_eq!(po_entry.parse_line(line), ParseResult::Ok)
+    }
+    assert!(po_entry.valid);
+    assert_eq!(po_entry.tilde, TildeMode::Yes);
+    assert_eq!(po_entry.parse_line(b""), ParseResult::NextEntry);
+
+    let mut output = vec![];
+    assert!(po_entry.commit(&mut HashMap::new(), &mut output));
+    assert_eq!(output, b"#~ msgid \"foo\"\n#~ msgstr \"bar\"\n");
 }
 
 #[test]
@@ -824,6 +884,16 @@ fn poentry_skip_duplicates_conflict() {
     File::open("corpus/duplicates_conflict.po").unwrap().read_to_end(&mut input).unwrap();
     let mut expected: Vec<u8> = vec![];
     File::open("corpus/duplicates_conflict.po.res").unwrap().read_to_end(&mut expected).unwrap();
+    let result = parse_po_lines(&input).unwrap();
+    assert_eq!(String::from_utf8(result).unwrap(), String::from_utf8(expected).unwrap());
+}
+
+#[test]
+fn poentry_repeat_duplicate_without_tilde() {
+    let mut input: Vec<u8> = vec![];
+    File::open("corpus/duplicates_without_tilde.po").unwrap().read_to_end(&mut input).unwrap();
+    let mut expected: Vec<u8> = vec![];
+    File::open("corpus/duplicates_without_tilde.po.res").unwrap().read_to_end(&mut expected).unwrap();
     let result = parse_po_lines(&input).unwrap();
     assert_eq!(String::from_utf8(result).unwrap(), String::from_utf8(expected).unwrap());
 }
