@@ -1,6 +1,7 @@
 // TODO make input a slice
 // TODO more tests for try_merge
 // TODO support trailing text of a PoEntry after a merge
+// TODO only output conflicting Entries in larger conflicts as conflict
 
 extern crate regex;
 #[macro_use]
@@ -584,7 +585,7 @@ struct Conflict<'l> {
 
 impl<'l> Conflict<'l> {
     fn new(initial_entry: PoEntry<'l>, initial_line: &[u8]) -> Self {
-        let mut input = vec![];
+        let mut input = initial_entry.input.clone();
         input.extend_from_slice(initial_line);
         input.push(b'\n');
         Conflict {
@@ -898,6 +899,17 @@ fn complete_file_with_reordered_conflict_with_elements_only_on_one_side() {
     let mut expected: Vec<u8> = vec![];
     File::open("corpus/elements_only_on_one_side.po.res").unwrap().read_to_end(&mut expected).unwrap();
     assert_eq!(parse_po_lines(&input), expected);
+}
+
+#[test]
+fn complete_file_with_bug1() {
+    let mut input: Vec<u8> = vec![];
+    File::open("corpus/conflict_with_prefix.po").unwrap().read_to_end(&mut input).unwrap();
+    let mut expected: Vec<u8> = vec![];
+    File::open("corpus/conflict_with_prefix.po.res").unwrap().read_to_end(&mut expected).unwrap();
+    let is = parse_po_lines(&input);
+    let should = String::from_utf8(expected).unwrap();
+    assert_eq!(String::from_utf8(is).unwrap(), should);
 }
 
 #[test]
