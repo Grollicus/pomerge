@@ -116,8 +116,15 @@ fn test_split_by_newline() {
 
 }
 
-fn _format_as_quoted_string(title: &[u8], data: &[u8], add_tilde: bool, result: &mut Vec<u8>) {
+fn _format_as_quoted_string(title: &[u8], data: &[u8], add_tilde: bool, output_empty: bool, result: &mut Vec<u8>) {
     if data.is_empty() {
+        if output_empty {
+            if add_tilde {
+                result.extend_from_slice(b"#~ ");
+            }
+            result.extend_from_slice(title);
+            result.extend_from_slice(b" \"\"\n");
+        }
         return;
     }
 
@@ -143,20 +150,28 @@ fn _format_as_quoted_string(title: &[u8], data: &[u8], add_tilde: bool, result: 
 #[test]
 fn test_format_as_quoted_string() {
     let mut result = vec![];
-    _format_as_quoted_string(b"msgid", b"asdf", false, &mut result);
+    _format_as_quoted_string(b"msgid", b"asdf", false, false, &mut result);
     assert_eq!(&result, b"msgid \"asdf\"\n");
 
     let mut result = vec![];
-    _format_as_quoted_string(b"msgid", b"asdf", true, &mut result);
+    _format_as_quoted_string(b"msgid", b"asdf", true, false, &mut result);
     assert_eq!(&result, b"#~ msgid \"asdf\"\n");
 
     let mut result = vec![];
-    _format_as_quoted_string(b"msgid", b"asdf\\nfoo", false, &mut result);
+    _format_as_quoted_string(b"msgid", b"asdf\\nfoo", false, false, &mut result);
     assert_eq!(&result, b"msgid \"asdf\\n\"\n\"foo\"\n");
 
     let mut result = vec![];
-    _format_as_quoted_string(b"msgid", b"asdf\\nfoo", true, &mut result);
+    _format_as_quoted_string(b"msgid", b"asdf\\nfoo", true, false, &mut result);
     assert_eq!(&result, b"#~ msgid \"asdf\\n\"\n#~ \"foo\"\n");
+
+    let mut result = vec![];
+    _format_as_quoted_string(b"msgstr", b"", false, true, &mut result);
+    assert_eq!(&result, b"msgstr \"\"\n");
+
+    let mut result = vec![];
+    _format_as_quoted_string(b"msgstr", b"", false, false, &mut result);
+    assert_eq!(&result, b"");
 }
 
 fn _append_prefixed_list(prefix: &[u8], lines: &Vec<&[u8]>, add_tilde: bool, result: &mut Vec<u8>) {
@@ -207,7 +222,9 @@ struct PoEntry<'l> {
     has_msgid: bool,
     msgids: Vec<u8>,
     msgid_plurals: Vec<u8>,
+    has_msgstr: bool,
     msgstrs: Vec<u8>,
+    has_msgstr_plurals: bool,
     msgstr_plurals: HashMap<u32, Vec<u8>>,
 }
 
@@ -227,7 +244,9 @@ impl<'l> PoEntry<'l> {
             has_msgid: false,
             msgids: vec![],
             msgid_plurals: vec![],
+            has_msgstr: false,
             msgstrs: vec![],
+            has_msgstr_plurals: false,
             msgstr_plurals: HashMap::new(),
         }
     }
@@ -308,6 +327,7 @@ impl<'l> PoEntry<'l> {
         }
 
         _append_quoted_string(&line[7..], &mut self.msgstrs);
+        self.has_msgstr = true;
         self.repeat_type = RepeatType::Msgstr;
     }
     fn _add_plural(&mut self, n: u32, value: &'l [u8]) {
@@ -338,6 +358,7 @@ impl<'l> PoEntry<'l> {
             return;
         }
         self._add_plural(n, value);
+        self.has_msgstr_plurals = true;
         self.repeat_type = RepeatType::MsgstrPlural(n);
     }
     fn invalid(&mut self, line: &'l [u8]) {
@@ -445,16 +466,16 @@ impl<'l> PoEntry<'l> {
         _append_prefixed_list(b"#, ", &self.flags, self.tilde == TildeMode::Yes, result);
         _append_prefixed_list(b"#| ", &self.previous_untranslated_strings, self.tilde == TildeMode::Yes, result);
 
-        _format_as_quoted_string(b"msgctxt", &self.msgctxts, self.tilde == TildeMode::Yes, result);
-        _format_as_quoted_string(b"msgid", &self.msgids, self.tilde == TildeMode::Yes, result);
-        _format_as_quoted_string(b"msgid_plural", &self.msgid_plurals, self.tilde == TildeMode::Yes, result);
-        _format_as_quoted_string(b"msgstr", &self.msgstrs, self.tilde == TildeMode::Yes, result);
+        _format_as_quoted_string(b"msgctxt", &self.msgctxts, self.tilde == TildeMode::Yes, false, result);
+        _format_as_quoted_string(b"msgid", &self.msgids, self.tilde == TildeMode::Yes, self.has_msgid, result);
+        _format_as_quoted_string(b"msgid_plural", &self.msgid_plurals, self.tilde == TildeMode::Yes, false, result);
+        _format_as_quoted_string(b"msgstr", &self.msgstrs, self.tilde == TildeMode::Yes, self.has_msgstr, result);
 
         let mut keys: Vec<&u32> = (&self.msgstr_plurals).keys().collect();
         keys.sort();
         for n in keys {
             let lines = &self.msgstr_plurals[n];
-            _format_as_quoted_string(format!("msgstr[{}]", n).as_bytes(), &lines, self.tilde == TildeMode::Yes, result);
+            _format_as_quoted_string(format!("msgstr[{}]", n).as_bytes(), &lines, self.tilde == TildeMode::Yes, self.has_msgstr_plurals, result);
         }
 
         true
@@ -902,11 +923,22 @@ fn complete_file_with_reordered_conflict_with_elements_only_on_one_side() {
 }
 
 #[test]
-fn complete_file_with_bug1() {
+fn complete_file_with_conflict_with_prefix() {
     let mut input: Vec<u8> = vec![];
     File::open("corpus/conflict_with_prefix.po").unwrap().read_to_end(&mut input).unwrap();
     let mut expected: Vec<u8> = vec![];
     File::open("corpus/conflict_with_prefix.po.res").unwrap().read_to_end(&mut expected).unwrap();
+    let is = parse_po_lines(&input);
+    let should = String::from_utf8(expected).unwrap();
+    assert_eq!(String::from_utf8(is).unwrap(), should);
+}
+
+#[test]
+fn complete_file_with_bug1() {
+    let mut input: Vec<u8> = vec![];
+    File::open("corpus/bug1.po").unwrap().read_to_end(&mut input).unwrap();
+    let mut expected: Vec<u8> = vec![];
+    File::open("corpus/bug1.po.res").unwrap().read_to_end(&mut expected).unwrap();
     let is = parse_po_lines(&input);
     let should = String::from_utf8(expected).unwrap();
     assert_eq!(String::from_utf8(is).unwrap(), should);
