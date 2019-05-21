@@ -34,16 +34,8 @@ msgstr "ever"
 msgid "text_sing"
 msgid_plural "text_pl"
 msgstr[0] "your"
-<<<<<<< HEAD
 msgstr[1] "gettext"
 
 #: dj/views.py:7
 msgid "text_gettext"
 msgstr "floats"
-=======
-msgstr[1] "gettext"
-
-#: dj/views.py:7
-msgid "text_gettext"
-msgstr "floats"
->>>>>>> foo

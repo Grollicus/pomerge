@@ -18,24 +18,18 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: dj/views.py:3
-msgid "text1"
-msgstr "ylo"
-
-#: dj/views.py:4
-msgid "text2"
-msgstr "what"
-
-#: dj/views.py:5
-msgid "text3"
-msgstr "ever"
-
-#: dj/views.py:7
-msgid "text_gettext"
-msgstr "floats"
-
 #: dj/views.py:8
 msgid "text_sing"
 msgid_plural "text_pl"
 msgstr[0] "your"
+<<<<<<< HEAD
 msgstr[1] "gettext"
+=======
+msgstr[1] "gettexts"
+>>>>>>> foo
+
+#: dj/views.py:8
+msgid "asdjfhk"
+msgid_plural "asjkdhfk"
+msgstr[0] "xcvsdf"
+msgstr[1] "cxvbcxvb"

@@ -1,8 +1,6 @@
 // TODO make input a slice
 // TODO more tests for try_merge
-// TODO support trailing text of a PoEntry after a merge
 // TODO only output conflicting Entries in larger conflicts as conflict
-// TODO really merge the multiconflicts
 
 extern crate clap;
 extern crate regex;
@@ -541,7 +539,7 @@ impl<'l> PoEntry<'l> {
             || self
                 .msgstr_plurals
                 .keys()
-                .map(|n| other.msgstr_plurals.get(n).filter(|other| *other == &self.msgstr_plurals[n]).is_some())
+                .map(|n| other.msgstr_plurals.get(n).filter(|other| *other == &self.msgstr_plurals[n]).is_none())
                 .any(|b| b)
         {
             return None;
@@ -991,6 +989,17 @@ fn complete_file_with_multiconflict2() {
     File::open("corpus/multiconflict2.po").unwrap().read_to_end(&mut input).unwrap();
     let mut expected: Vec<u8> = vec![];
     File::open("corpus/multiconflict2.po.res").unwrap().read_to_end(&mut expected).unwrap();
+    let is = parse_po_lines(&input);
+    let should = String::from_utf8(expected).unwrap();
+    assert_eq!(String::from_utf8(is).unwrap(), should);
+}
+
+#[test]
+fn complete_file_with_plurals_conflicts() {
+    let mut input: Vec<u8> = vec![];
+    File::open("corpus/msgstr_plurals_conflicts.po").unwrap().read_to_end(&mut input).unwrap();
+    let mut expected: Vec<u8> = vec![];
+    File::open("corpus/msgstr_plurals_conflicts.po.res").unwrap().read_to_end(&mut expected).unwrap();
     let is = parse_po_lines(&input);
     let should = String::from_utf8(expected).unwrap();
     assert_eq!(String::from_utf8(is).unwrap(), should);
