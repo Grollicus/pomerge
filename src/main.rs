@@ -2,6 +2,7 @@
 // TODO more tests for try_merge
 // TODO support trailing text of a PoEntry after a merge
 // TODO only output conflicting Entries in larger conflicts as conflict
+// TODO really merge the multiconflicts
 
 extern crate regex;
 #[macro_use]
@@ -957,6 +958,28 @@ fn complete_file_with_bug1() {
     File::open("corpus/bug1.po").unwrap().read_to_end(&mut input).unwrap();
     let mut expected: Vec<u8> = vec![];
     File::open("corpus/bug1.po.res").unwrap().read_to_end(&mut expected).unwrap();
+    let is = parse_po_lines(&input);
+    let should = String::from_utf8(expected).unwrap();
+    assert_eq!(String::from_utf8(is).unwrap(), should);
+}
+
+#[test]
+fn complete_file_with_multiconflict1() {
+    let mut input: Vec<u8> = vec![];
+    File::open("corpus/multiconflict1.po").unwrap().read_to_end(&mut input).unwrap();
+    let mut expected: Vec<u8> = vec![];
+    File::open("corpus/multiconflict1.po.res").unwrap().read_to_end(&mut expected).unwrap();
+    let is = parse_po_lines(&input);
+    let should = String::from_utf8(expected).unwrap();
+    assert_eq!(String::from_utf8(is).unwrap(), should);
+}
+
+#[test]
+fn complete_file_with_multiconflict2() {
+    let mut input: Vec<u8> = vec![];
+    File::open("corpus/multiconflict2.po").unwrap().read_to_end(&mut input).unwrap();
+    let mut expected: Vec<u8> = vec![];
+    File::open("corpus/multiconflict2.po.res").unwrap().read_to_end(&mut expected).unwrap();
     let is = parse_po_lines(&input);
     let should = String::from_utf8(expected).unwrap();
     assert_eq!(String::from_utf8(is).unwrap(), should);
