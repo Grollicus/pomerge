@@ -600,18 +600,29 @@ enum ConflictPosition {
 struct Conflict<'l> {
     input: Vec<u8>,
     position: ConflictPosition,
+    left_branch: Vec<u8>,
+    right_branch: Vec<u8>,
     left: Vec<PoEntry<'l>>,
     right: Vec<PoEntry<'l>>,
 }
 
 impl<'l> Conflict<'l> {
     fn new(initial_entry: PoEntry<'l>, initial_line: &[u8]) -> Self {
+        lazy_static! {
+            static ref DIFF_HEADER_REGEX: Regex = Regex::new(r"^<<<+ (.*)$").expect("Invalid DIFF_HEADER_REGEX");
+        }
+
         let mut input = initial_entry.input.clone();
         input.extend_from_slice(initial_line);
         input.push(b'\n');
+
+        let captures : Captures<'_> = DIFF_HEADER_REGEX.captures(initial_line).expect("Valid initial conflict line");
+
         Conflict {
             input: input,
             position: ConflictPosition::Left,
+            left_branch: captures.get(1).expect("DIFF_HEADER_REGEX to always have one capture group").as_bytes().to_vec(),
+            right_branch: vec![],
             left: vec![initial_entry.clone()],
             right: vec![initial_entry],
         }
@@ -628,7 +639,12 @@ impl<'l> Conflict<'l> {
     }
 
     fn parse_right(&mut self, line: &'l [u8]) -> ParseResult {
-        if line.len() >= 8 && &line[0..8] == b">>>>>>> " {
+        lazy_static! {
+            static ref DIFF_FOOTER_REGEX: Regex = Regex::new(r">>>+ (.*)$").expect("Invalid DIFF_FOOTER_REGEX");
+        }
+
+        if let Some(captures) = DIFF_FOOTER_REGEX.captures(line) {
+            self.right_branch = captures.get(1).expect("DIFF_FOOTER_REGEX to always have one capture group").as_bytes().to_vec();
             return ParseResult::NextEntry;
         }
         if self.right.last_mut().unwrap().parse_line(line) == ParseResult::NextEntry {
@@ -695,9 +711,11 @@ impl<'l> Conflict<'l> {
 #[test]
 fn test_conflict_marker_parsing() {
     let initial = PoEntry::new();
-    let mut c = Conflict::new(initial, b"<<<<<<<");
+    let mut c = Conflict::new(initial, b"<<<<<<< foo");
     assert!(c.parse_left(b"=======") == ParseResult::NextEntry);
-    assert_eq!(c.parse_right(b">>>>>>> "), ParseResult::NextEntry)
+    assert_eq!(c.parse_right(b">>>>>>> bar"), ParseResult::NextEntry);
+    assert_eq!(c.left_branch, b"foo");
+    assert_eq!(c.right_branch, b"bar");
 }
 
 pub fn parse_po_lines(file_content: &Vec<u8>) -> Vec<u8> {
