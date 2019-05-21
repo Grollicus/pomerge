@@ -4,6 +4,7 @@
 // TODO only output conflicting Entries in larger conflicts as conflict
 // TODO really merge the multiconflicts
 
+extern crate clap;
 extern crate regex;
 #[macro_use]
 extern crate lazy_static;
@@ -11,10 +12,11 @@ extern crate lazy_static;
 #[cfg(test)]
 use pretty_assertions::assert_eq;
 
+use clap::{Arg, App};
 use regex::bytes::{Regex, Captures};
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::{Read, Write, stdout};
 use std::str::from_utf8;
 
 #[derive(Debug)]
@@ -759,44 +761,53 @@ pub fn parse_po_lines(file_content: &Vec<u8>) -> Vec<u8> {
     result
 }
 
-fn usage() {
-    println!("Usage: {} <file>..", std::env::args().next().unwrap_or(String::from("pomerge")));
-    println!("Resolves git-style merge conflicts in PO files.");
-    std::process::exit(1);
-}
-
 fn main() -> Result<(), MyErr> {
-    let argv: Vec<String> = std::env::args().collect();
-    if argv.len() < 2 {
-        usage();
-    }
 
-    for fname in &argv[1..] {
+    let args = App::new(env!("CARGO_PKG_NAME"))
+        .version(env!("CARGO_PKG_VERSION"))
+        .about(env!("CARGO_PKG_DESCRIPTION"))
+        .author(env!("CARGO_PKG_AUTHORS"))
+        .arg(Arg::with_name("FILE")
+            .multiple(true)
+            .required(true)
+        ).arg(Arg::with_name("debug")
+            .short("d")
+            .help("Debug mode: Don't overwrite files, print to stdout instead")
+        ).get_matches();
+
+    for fname in args.values_of_os("FILE").expect("FILE to exist because multiple(true)") {
         let mut file_content : Vec<u8> = vec![];
 
         {
             let mut file = match File::open(fname) {
-                Err(e) => { eprintln!("Could not open {}: {:?}", fname, e); continue; }
+                Err(e) => { eprintln!("Could not open {:?}: {:?}", fname, e); continue; }
                 Ok(file) => {
                     file
                 }
             };
 
             if let Err(e) = file.read_to_end(&mut file_content) {
-                eprintln!("Read from {} failed: {:?}", fname, e);
+                eprintln!("Read from {:?} failed: {:?}", fname, e);
                 continue;
             }
         }
 
         let result = parse_po_lines(&file_content);
 
-        {
+        if args.is_present("debug") {
+            let stdout = stdout();
+            let mut out = stdout.lock();
+            if let Err(e) = out.write_all(&result) {
+                eprintln!("Write to stdout for {:?} failed: {:?}", fname, e);
+                continue;
+            }
+        } else {
             let mut file = match File::create(fname) {
-                Err(e) => { eprintln!("Could not open {}: {:?}", fname, e); continue; }
+                Err(e) => { eprintln!("Could not open {:?}: {:?} for writing", fname, e); continue; }
                 Ok(file) => { file }
             };
             if let Err(e) = file.write_all(&result) {
-                eprintln!("Write to {} failed: {:?}", fname, e);
+                eprintln!("Write to {:?} failed: {:?}", fname, e);
                 continue;
             }
         }
