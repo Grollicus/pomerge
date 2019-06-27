@@ -126,10 +126,10 @@ fn test_split_by_newline() {
     assert_eq!(iter.next(), None);
 
 
-    let mut iter = LinearTokenizer::new(b"asdf\\nfoo\\nbar\\n", b"\\n");
+    let mut iter = LinearTokenizer::new(b"asdf\\nfoo\\nb\\ar\\n", b"\\n");
     assert_eq!(iter.next().unwrap(), b"asdf");
     assert_eq!(iter.next().unwrap(), b"foo");
-    assert_eq!(iter.next().unwrap(), b"bar");
+    assert_eq!(iter.next().unwrap(), b"b\\ar");
     assert_eq!(iter.next().unwrap(), b"");
     assert_eq!(iter.next(), None);
 
@@ -574,16 +574,16 @@ impl<'l> PoEntry<'l> {
 #[test]
 fn test_poentry_try_merge() {
     let test_cases: Vec<(Vec<&[u8]>, Vec<&[u8]>, _, _, Option<&[u8]>)> = vec![
-        (vec![b"invalid"], vec![b"msgid \"asdf\""], false, true, None),
-        (vec![&b"msgid \"asdf\""[..]], vec![&b"invalid"[..]], true, false, None),
-        (vec![&b"msgid \"asdf\""[..]], vec![&b"msgid \"something else\""[..]], true, true, None),
-        (vec![&b"msgid \"asdf\""[..]], vec![&b"msgid \"asdf\""[..]], true, true, Some(&b"msgid \"asdf\"\n"[..])),
+        (vec![b"invalid"], vec![br#"msgid "asdf""#], false, true, None),
+        (vec![br#"msgid "asdf""#], vec![b"invalid"], true, false, None),
+        (vec![br#"msgid "asdf""#], vec![br#"msgid "something else""#], true, true, None),
+        (vec![br#"msgid "asdf""#], vec![br#"msgid "asdf""#], true, true, Some(b"msgid \"asdf\"\n")),
         (
-            vec![&b"msgid \"asdf\""[..], &b"msgstr \"asdf\""[..]],
-            vec![&b"msgid \"asdf\""[..], &b"msgstr \"asdf\""[..]],
+            vec![br#"msgid "asdf""#, br#"msgstr "asdf""#],
+            vec![br#"msgid "asdf""#, br#"msgstr "asdf""#],
             true,
             true,
-            Some(&b"msgid \"asdf\"\nmsgstr \"asdf\"\n"[..]),
+            Some(b"msgid \"asdf\"\nmsgstr \"asdf\"\n"),
         ),
     ];
 
@@ -602,7 +602,7 @@ fn test_poentry_try_merge() {
         if let Some(expected_str) = expected_result {
             let mut res : Vec<u8> = vec![];
             assert!(a.try_merge(&b).unwrap().commit(&mut HashMap::new(), &mut res));
-            assert_eq!(expected_str, &res[..]);
+            assert_eq!(expected_str, res.as_slice());
         } else {
             assert!(a.try_merge(&b).is_none());
         }
