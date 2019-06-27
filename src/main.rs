@@ -762,12 +762,19 @@ fn test_conflict_marker_parsing() {
 enum HeaderMode {
     Dunno,
     Parsing,
+    ConflictLeft,
+    ConflictRight,
     Done,
 }
 
 pub fn parse_po_lines(file_content: &Vec<u8>) -> Result<Vec<u8>, String> {
+    lazy_static! {
+        static ref CREATION_DATE_CONFLICT: Regex = Regex::new("^<<<+ .*\n(\"POT-Creation-Date: .*\")\n===+\n\"POT-Creation-Date: .*\n>>>+ .*\n$").expect("valid CREATION_DATE_CONFLICT Regex");
+    }
+
     let mut result: Vec<u8> = vec![];
     let mut file_header = HeaderMode::Dunno;
+    let mut header_conflict_store: Vec<u8> = vec![];
     let mut current_entry = PoEntry::new();
     let mut current_conflict: Option<Conflict> = None;
     let mut known_msgids : HashMap<Vec<u8>, PoEntry> = HashMap::new();
@@ -783,14 +790,47 @@ pub fn parse_po_lines(file_content: &Vec<u8>) -> Result<Vec<u8>, String> {
                     file_header = HeaderMode::Done
                 }
             }
-            if file_header == HeaderMode::Parsing {
-                result.extend_from_slice(line);
-                result.push(b'\n');
-                if WHITESPACE_LINE.is_match(&line) {
-                    file_header = HeaderMode::Done
-                }
-                continue;
-            }
+            match file_header {
+                HeaderMode::Parsing => {
+                    if line.len() > 7 && &line[0..7] == b"<<<<<<<" {
+                        file_header = HeaderMode::ConflictLeft;
+                        header_conflict_store.clear();
+                        header_conflict_store.extend_from_slice(line);
+                        header_conflict_store.push(b'\n');
+                        continue;
+                    }
+                    result.extend_from_slice(line);
+                    result.push(b'\n');
+                    if WHITESPACE_LINE.is_match(&line) {
+                        file_header = HeaderMode::Done
+                    }
+                    continue;
+                },
+                HeaderMode::ConflictLeft => {
+                    header_conflict_store.extend_from_slice(line);
+                    header_conflict_store.push(b'\n');
+                    if line.len() >= 7 && &line[0..7] == b"=======" {
+                        file_header = HeaderMode::ConflictRight;
+                    }
+                    continue;
+                },
+                HeaderMode::ConflictRight => {
+                    header_conflict_store.extend_from_slice(line);
+                    header_conflict_store.push(b'\n');
+                    if line.len() >= 3 && &line[0..3] == b">>>" {
+                        if let Some(m) = CREATION_DATE_CONFLICT.captures(&header_conflict_store) {
+                            result.extend_from_slice(m.get(1).expect("CREATION_DATE_CONFLICT has one Group").as_bytes());
+                            result.push(b'\n');
+                        } else {
+                            result.extend_from_slice(&header_conflict_store);
+                        }
+                        file_header = HeaderMode::Parsing;
+                    }
+                    continue;
+                },
+                HeaderMode::Dunno => unreachable!(),
+                HeaderMode::Done => {},
+            };
         }
 
         if let Some(mut conflict) = current_conflict {
@@ -1003,11 +1043,20 @@ fn complete_file_with_path_conflict() {
     test_corpus_content("paths")
 }
 
-// TODO tgr fix this
-// #[test]
-// fn complete_file_with_header_conflict() {
-//     test_corpus_content("header")
-// }
+#[test]
+fn complete_file_with_header_conflict1() {
+    test_corpus_content("header1")
+}
+
+#[test]
+fn complete_file_with_header_conflict2() {
+    test_corpus_content("header2")
+}
+
+#[test]
+fn complete_file_with_header_conflict3() {
+    test_corpus_content("header3")
+}
 
 #[test]
 fn complete_file_with_reordered_conflict() {
