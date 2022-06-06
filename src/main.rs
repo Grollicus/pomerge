@@ -19,6 +19,7 @@
 // TODO make input a slice
 // TODO more tests for try_merge
 // TODO only output conflicting Entries in larger conflicts as conflict
+// TODO tests for parser errors
 
 extern crate clap;
 extern crate regex;
